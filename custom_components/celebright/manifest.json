@@ -1,13 +1,13 @@
 {
   "domain": "celebright",
   "name": "Celebright",
-  "version": "0.2.0",
-  "documentation": "https://github.com/MrToast99/Celebright_ha",
-  "requirements": ["aiohttp>=3.8.0"],
-  "dependencies": [],
   "codeowners": ["@MrToast99"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/MrToast99/Celebright_ha",
+  "integration_type": "device",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/MrToast99/Celebright_ha/issues",
-  "config_flow": true,
-  "integration_type": "device"
+  "requirements": ["aiohttp>=3.8.0"],
+  "version": "0.2.0"
 }
