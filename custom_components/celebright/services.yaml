@@ -1,0 +1,283 @@
+create_event:
+  name: Create schedule event
+  description: >
+    Add a scheduled lighting event to a Celebright controller. The event runs on
+    the device itself, exactly like events created in the Celebright app.
+  fields:
+    device_id:
+      name: Device ID
+      description: Celebright device ID (the numeric ID, e.g. 123456789). Optional if you only have one device.
+      required: false
+      example: "123456789"
+      selector:
+        text:
+    name:
+      name: Event name
+      description: A label for the event.
+      required: true
+      example: "Christmas"
+      selector:
+        text:
+    scene:
+      name: Scene
+      description: Name of a saved scene to display (or its UUID).
+      required: true
+      example: "My Holiday Scene"
+      selector:
+        text:
+    start_date:
+      name: Start date
+      description: First date the event applies (YYYY-MM-DD).
+      required: true
+      example: "2026-12-01"
+      selector:
+        text:
+    end_date:
+      name: End date
+      description: Last date in the active window (YYYY-MM-DD).
+      required: true
+      example: "2026-12-02"
+      selector:
+        text:
+    start_time:
+      name: Start time
+      description: "When the event turns on each day: sunset, sunrise, midnight, or HH:MM."
+      required: true
+      example: "sunset"
+      selector:
+        text:
+    end_time:
+      name: End time
+      description: "When the event ends each day: sunset, sunrise, midnight, or HH:MM."
+      required: true
+      example: "sunrise"
+      selector:
+        text:
+    priority:
+      name: Priority
+      description: 1 (lowest) to 4 (highest). Higher-priority events win when overlapping.
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 4
+          mode: slider
+    frequency:
+      name: Frequency
+      description: 1 = one-time / seasonal range, 4 = yearly recurring.
+      required: false
+      default: 1
+      selector:
+        select:
+          options:
+            - label: One-time / seasonal
+              value: "1"
+            - label: Yearly
+              value: "4"
+    interval:
+      name: Interval
+      description: Repeat interval (usually 1).
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 52
+          mode: box
+    repeat_until:
+      name: Repeat until
+      description: Optional end date for a seasonal/recurring window (YYYY-MM-DD).
+      required: false
+      example: "2026-12-30"
+      selector:
+        text:
+    by_month:
+      name: By month
+      description: For yearly events on a specific date — month number (1–12).
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 12
+          mode: box
+    by_month_day:
+      name: By month day
+      description: For yearly events on a specific date — day of month (1–31).
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    by_day:
+      name: By weekday
+      description: "For yearly nth-weekday events — MO, TU, WE, TH, FR, SA, or SU."
+      required: false
+      example: "SU"
+      selector:
+        text:
+    by_set_pos:
+      name: By set position
+      description: "Which occurrence of the weekday (1 = first, -1 = last)."
+      required: false
+      selector:
+        number:
+          min: -1
+          max: 5
+          mode: box
+
+update_event:
+  name: Update schedule event
+  description: >
+    Modify an existing scheduled event in place. Identify it by event_uuid or by
+    its current event_name, then supply the new values.
+  fields:
+    event_uuid:
+      name: Event UUID
+      description: UUID of the event to update (from the Scheduled Events sensor attributes).
+      required: false
+      example: "00000000-1111-2222-3333-444444444444"
+      selector:
+        text:
+    event_name:
+      name: Existing event name
+      description: Current name of the event to update (alternative to event_uuid).
+      required: false
+      example: "Christmas"
+      selector:
+        text:
+    device_id:
+      name: Device ID
+      description: Celebright device ID. Optional if you only have one device.
+      required: false
+      selector:
+        text:
+    name:
+      name: Event name
+      description: New (or unchanged) label for the event.
+      required: true
+      selector:
+        text:
+    scene:
+      name: Scene
+      description: Name of a saved scene to display (or its UUID).
+      required: true
+      selector:
+        text:
+    start_date:
+      name: Start date
+      required: true
+      example: "2026-12-01"
+      selector:
+        text:
+    end_date:
+      name: End date
+      required: true
+      example: "2026-12-02"
+      selector:
+        text:
+    start_time:
+      name: Start time
+      description: "sunset, sunrise, midnight, or HH:MM."
+      required: true
+      example: "sunset"
+      selector:
+        text:
+    end_time:
+      name: End time
+      description: "sunset, sunrise, midnight, or HH:MM."
+      required: true
+      example: "sunrise"
+      selector:
+        text:
+    priority:
+      name: Priority
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 4
+          mode: slider
+    frequency:
+      name: Frequency
+      required: false
+      default: 1
+      selector:
+        select:
+          options:
+            - label: One-time / seasonal
+              value: "1"
+            - label: Yearly
+              value: "4"
+    interval:
+      name: Interval
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 52
+          mode: box
+    repeat_until:
+      name: Repeat until
+      required: false
+      example: "2026-12-30"
+      selector:
+        text:
+    by_month:
+      name: By month
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 12
+          mode: box
+    by_month_day:
+      name: By month day
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    by_day:
+      name: By weekday
+      description: "MO, TU, WE, TH, FR, SA, or SU."
+      required: false
+      selector:
+        text:
+    by_set_pos:
+      name: By set position
+      required: false
+      selector:
+        number:
+          min: -1
+          max: 5
+          mode: box
+
+delete_event:
+  name: Delete schedule event
+  description: Remove a scheduled event from the controller.
+  fields:
+    event_uuid:
+      name: Event UUID
+      description: UUID of the event to delete (from the Scheduled Events sensor attributes).
+      required: false
+      example: "00000000-1111-2222-3333-444444444444"
+      selector:
+        text:
+    event_name:
+      name: Event name
+      description: Name of the event to delete (alternative to event_uuid).
+      required: false
+      example: "Christmas"
+      selector:
+        text:
+    device_id:
+      name: Device ID
+      description: Celebright device ID. Optional if you only have one device.
+      required: false
+      selector:
+        text:

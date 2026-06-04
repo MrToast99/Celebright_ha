@@ -1,0 +1,32 @@
+{
+  "entity": {
+    "select": {
+      "scene": {
+        "name": "Scene",
+        "state": {
+          "off": "Off"
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Celebright",
+        "description": "Enter your Celebright account credentials.",
+        "data": {
+          "email": "Email address",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to Celebright cloud.",
+      "invalid_auth": "Invalid email or password.",
+      "unknown": "Unexpected error — check the Home Assistant logs."
+    },
+    "abort": {
+      "already_configured": "This Celebright account is already configured."
+    }
+  }
+}

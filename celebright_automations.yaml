@@ -1,0 +1,122 @@
+# =====================================================================
+# Celebright example automations
+#
+# This file is a LIST of automations. Use it ONE of two ways:
+#
+#  ── Option A — include it from configuration.yaml (recommended) ──────
+#     1. Place THIS file in your config folder, right next to
+#        configuration.yaml (e.g. /config/celebright_automations.yaml on
+#        HA OS / Container). It must NOT be in a subfolder, the name must be
+#        all lowercase, and it must end in .yaml (no hidden .txt).
+#     2. In configuration.yaml add (at column 0):
+#          automation celebright: !include celebright_automations.yaml
+#        (If an "automation:" line already exists, keep it and add this on
+#        the next line — "celebright" is just a unique label.)
+#     3. Developer Tools → YAML → Check Configuration, then Reload Automations.
+#     (Use the whole file as-is — it is already a valid list.)
+#
+#  ── Option B — paste a SINGLE automation into the UI editor ──────────
+#     Settings → Automations → Create automation → Edit in YAML.
+#     That editor expects ONE automation as a plain mapping, so you must
+#     paste a block WITHOUT the leading "- " and WITHOUT the "id:" line.
+#     (Pasting this whole file there gives "extra keys not allowed
+#     @ data['0']" because it is a list.) See the README for a ready-to-
+#     paste single example.
+#
+# Scene names below are PLACEHOLDERS — replace them with your own saved
+# scene names exactly as they appear in the scene dropdown
+# (select.<device>_scene). Entity IDs assume the device slug "house".
+# =====================================================================
+
+- id: celebright_scene_at_sunset
+  alias: Celebright scene at sunset (December)
+  description: Activate a holiday scene every evening at sunset during December.
+  triggers:
+    - trigger: sun
+      event: sunset
+  conditions:
+    - condition: template
+      value_template: "{{ now().month == 12 }}"
+  actions:
+    - action: select.select_option
+      target:
+        entity_id: select.house_scene
+      data:
+        option: "REPLACE WITH YOUR SCENE NAME"
+  mode: single
+
+- id: celebright_lights_off_late_night
+  alias: Celebright lights off late night
+  description: Resume the controller schedule (turn off manual override) at 11:30 PM.
+  triggers:
+    - trigger: time
+      at: "23:30:00"
+  actions:
+    - action: select.select_option
+      target:
+        entity_id: select.house_scene
+      data:
+        option: "Off"
+  mode: single
+
+- id: celebright_halloween_october
+  alias: Celebright Halloween in October
+  description: Activate a scene at sunset for the second half of October.
+  triggers:
+    - trigger: sun
+      event: sunset
+  conditions:
+    - condition: template
+      value_template: "{{ now().month == 10 and now().day >= 15 }}"
+  actions:
+    - action: select.select_option
+      target:
+        entity_id: select.house_scene
+      data:
+        option: "REPLACE WITH YOUR SCENE NAME"
+  mode: single
+
+- id: celebright_party_toggle
+  alias: Celebright party mode on input boolean
+  description: >
+    Triggering a scene from a helper toggle. Create an input_boolean.party_mode
+    helper, then this flips the lights to your party scene when it's on and back
+    to the schedule when off.
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.party_mode
+  actions:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.party_mode
+              state: "on"
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "REPLACE WITH YOUR SCENE NAME"
+      default:
+        - action: select.select_option
+          target:
+            entity_id: select.house_scene
+          data:
+            option: "Off"
+  mode: single
+
+- id: celebright_notify_offline
+  alias: Celebright notify when controller goes offline
+  description: Send a notification if the Celebright controller becomes unavailable.
+  triggers:
+    - trigger: state
+      entity_id: light.house
+      to: "unavailable"
+      for:
+        minutes: 5
+  actions:
+    - action: persistent_notification.create
+      data:
+        title: Celebright offline
+        message: "The Celebright controller has been unreachable for 5 minutes."
+  mode: single

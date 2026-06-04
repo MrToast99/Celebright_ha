@@ -1,0 +1,185 @@
+# =====================================================================
+# Celebright dashboard
+#
+# This dashboard is ACCOUNT-AGNOSTIC: scenes are read live from your
+# Celebright account (via the select entity), so it works for anyone
+# without editing scene names.
+#
+# Entity IDs assume the device slug "house" (light.house, select.house_scene,
+# sensor.house_*). If your device is named differently, search-replace "house"
+# with your slug (check Settings -> Devices & Services -> Entities).
+# =====================================================================
+title: Celebright
+views:
+  # ================================================================
+  # 1. LIGHTS - manual control + scene picker
+  # ================================================================
+  - title: Lights
+    path: celebright
+    icon: mdi:string-lights
+    cards:
+      - type: markdown
+        content: "## Celebright"
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Status
+            entities:
+              - entity: light.house
+                name: Lights
+              - entity: select.house_scene
+                name: Active Scene
+              - entity: sensor.house_current_display
+                name: Current Display
+              - entity: binary_sensor.house_schedule
+                name: Schedule
+
+          - type: glance
+            title: Device Info
+            show_name: true
+            show_icon: true
+            entities:
+              - entity: sensor.house_model
+                name: Model
+              - entity: sensor.house_firmware
+                name: Firmware
+              - entity: sensor.house_led_count
+                name: LEDs
+
+      - type: light
+        entity: light.house
+        name: Manual Color / Brightness
+
+  # ================================================================
+  # 2. SCHEDULE - built-in Celebright lighting calendar (read live)
+  # ================================================================
+  - title: Schedule
+    path: schedule
+    icon: mdi:calendar-clock
+    cards:
+      - type: entities
+        title: Schedule Control
+        entities:
+          - entity: binary_sensor.house_schedule
+            name: Schedule Enabled
+          - entity: sensor.house_scheduled_events
+            name: Total Scheduled Events
+          - entity: select.house_scene
+            name: Override Scene
+        footer:
+          type: buttons
+          entities:
+            - entity: select.house_scene
+              name: Resume Schedule
+              tap_action:
+                action: perform-action
+                perform_action: select.select_option
+                target:
+                  entity_id: select.house_scene
+                data:
+                  option: "Off"
+
+      - type: markdown
+        title: Lighting Schedule
+        content: >
+          {% set evs = state_attr('sensor.house_scheduled_events', 'events') %}
+
+          {% if evs %}
+
+          | Event | Scene | When | Time |
+
+          |-------|-------|------|------|
+
+          {% for e in evs -%}
+
+          | {{ e.name }} | {{ e.scene }} | {{ e.when }} | {{ e.time }} |
+
+          {% endfor %}
+
+          {% else %}
+
+          _No scheduled events found._
+
+          {% endif %}
+
+      - type: button
+        name: Add / Edit / Remove Events
+        icon: mdi:calendar-edit
+        show_state: false
+        tap_action:
+          action: navigate
+          navigation_path: /developer-tools/action
+
+      - type: markdown
+        content: >
+          ### Adding, editing, and removing events
+
+          The schedule runs on the controller and is also editable in the
+          **Celebright app**. From Home Assistant you do it with three actions —
+          tap **Add / Edit / Remove Events** above (or go to
+          **Developer Tools → Actions**) and pick one:
+
+
+          - **`celebright.create_event`** — add a new scheduled event
+
+          - **`celebright.update_event`** — change an existing one (identify it by
+            its name or UUID)
+
+          - **`celebright.delete_event`** — remove one
+
+
+          Each action shows a fill-in form (scene, dates, sunset/sunrise/HH:MM
+          times, priority, recurrence). Event names and UUIDs for edit/delete are
+          listed in the **Total Scheduled Events** sensor's attributes.
+
+
+          Selecting a scene temporarily overrides the schedule; **Resume Schedule**
+          hands control back to it.
+
+  # ================================================================
+  # 3. AUTOMATIONS - HA automations driving the lights
+  # ================================================================
+  - title: Automations
+    path: automations
+    icon: mdi:robot
+    cards:
+      - type: markdown
+        content: >
+          ## Celebright Automations
+
+          Use the buttons below to create automations or open Home Assistant's
+          automation editor, where all of yours are listed and managed. (For a
+          live in-dashboard list, see the optional HACS card in the README.)
+
+      - type: horizontal-stack
+        cards:
+          - type: button
+            name: Create Automation
+            icon: mdi:plus-circle
+            tap_action:
+              action: navigate
+              navigation_path: /config/automation/edit/new
+          - type: button
+            name: Manage Automations
+            icon: mdi:cog
+            tap_action:
+              action: navigate
+              navigation_path: /config/automation/dashboard
+
+      - type: markdown
+        title: Example - activate a scene at sunset
+        content: |
+          ```yaml
+          alias: Celebright scene at sunset
+          triggers:
+            - trigger: sun
+              event: sunset
+          actions:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "<one of your saved scene names>"
+          ```
+          More ready-to-use examples are in **celebright_automations.yaml**.
