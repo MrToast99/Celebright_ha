@@ -171,8 +171,21 @@ Celebright user. The default dashboard uses **only built-in cards** (no HACS
 required).
 
 > **Entity names:** the YAML assumes the device slug `house` (`light.house`,
-> `select.house_scene`, …). If your device is named differently, search-replace
-> `house` in the YAML with your slug.
+> ### ⚠️ Replace the `house` slug with your own
+>
+> The bundled dashboard and automations use entity IDs like `light.house` and
+> `select.house_scene`. **These are built from your controller's name** — they
+> read `house` only because the reference device is named "House". **If your
+> controller has any other name, those IDs don't exist for you** and cards show
+> *"Entity not found"*.
+>
+> **Fix (once):** in the YAML, **Find & Replace `house` → your slug** (lowercase,
+> spaces → underscores, e.g. `Front Yard` → `front_yard`).
+>
+> **Find your slug:** Settings → Devices & Services → **Entities**, search
+> `celebright` — the bit between the dot and `_scene` is your slug
+> (e.g. `select.front_yard_scene` → slug is `front_yard`). Renaming the device
+> later doesn't change the entity IDs, so this is a one-time edit.
 
 ### Optional dynamic cards (require HACS frontend cards)
 

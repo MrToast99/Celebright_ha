@@ -1,13 +1,25 @@
 # =====================================================================
 # Celebright dashboard
 #
-# This dashboard is ACCOUNT-AGNOSTIC: scenes are read live from your
-# Celebright account (via the select entity), so it works for anyone
-# without editing scene names.
+# ┌───────────────────────────────────────────────────────────────┐
+# │  ⚠ BEFORE YOU SAVE: replace the slug "house" with YOUR device. │
+# └───────────────────────────────────────────────────────────────┘
 #
-# Entity IDs assume the device slug "house" (light.house, select.house_scene,
-# sensor.house_*). If your device is named differently, search-replace "house"
-# with your slug (check Settings -> Devices & Services -> Entities).
+# Every entity ID below is built from YOUR controller's name. They are
+# written here as light.house / select.house_scene / sensor.house_* only
+# because the reference device is named "House". If your controller has any
+# other name, these IDs DO NOT EXIST for you and the cards show
+# "Entity not found".
+#
+# FIX (10 seconds): in your editor, Find & Replace  house  ->  your_slug
+#   (lowercase, spaces become underscores, e.g. "Front Yard" -> front_yard)
+#
+# FIND YOUR SLUG: Settings -> Devices & Services -> Entities, search
+#   "celebright" — the part after the dot and before "_scene" is your slug
+#   (e.g. select.front_yard_scene  ->  slug is  front_yard).
+#
+# (Scenes, schedule, and device info ARE read live from your account, so
+#  only the slug needs changing — never the scene names.)
 # =====================================================================
 title: Celebright
 views:
@@ -168,8 +180,37 @@ views:
               navigation_path: /config/automation/dashboard
 
       - type: markdown
-        title: Example - activate a scene at sunset
+        title: Building one in the GUI (read me first)
+        content: >
+          When adding an **action** in the automation editor, scene control is
+          **not** under "celebright" — those actions only edit the device
+          *schedule*. To turn on a scene, search the action box for **`select`**:
+
+
+          1. **Add Action** → type **`select`** → choose **"Select: Select option"**
+
+          2. **Targets → Choose entity** → **House Scene** (`select.house_scene`)
+
+          3. **Option** → pick one of your scene names (or **Off** to resume the
+             schedule)
+
+
+          Other actions you might want:
+
+          - **Colour / brightness** → search **`light`** → "Light: Turn on" →
+            target **House** (`light.house`)
+
+          - **Edit the schedule** → search **`celebright`** → create / update /
+            delete event
+
+
+          **Triggers** are normal HA triggers — e.g. *Numeric state* on a sensor
+          (aurora visibility above 78), *Sun* (sunset/sunrise), or *Time*.
+
+      - type: markdown
+        title: Example (YAML) - activate a scene at sunset
         content: |
+          Same thing in YAML (paste via the action's **⋮ → Edit in YAML**):
           ```yaml
           alias: Celebright scene at sunset
           triggers:

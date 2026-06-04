@@ -23,9 +23,13 @@
 #     @ data['0']" because it is a list.) See the README for a ready-to-
 #     paste single example.
 #
-# Scene names below are PLACEHOLDERS — replace them with your own saved
-# scene names exactly as they appear in the scene dropdown
-# (select.<device>_scene). Entity IDs assume the device slug "house".
+# TWO things to replace before use:
+#  1. SLUG: entity IDs below use "house" (select.house_scene, light.house) only
+#     because the reference device is named "House". If yours differs, Find &
+#     Replace  house  ->  your_slug  (Settings -> Devices & Services -> Entities,
+#     search "celebright" to find it, e.g. select.front_yard_scene -> front_yard).
+#  2. SCENE NAMES: the "REPLACE WITH YOUR SCENE NAME" placeholders -> your own
+#     saved scene names exactly as they appear in the scene dropdown.
 # =====================================================================
 
 - id: celebright_scene_at_sunset
