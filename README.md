@@ -143,6 +143,7 @@ For a controller named **House**, you get:
 | `sensor.house_bulb_type` | sensor | e.g. `SC24-GEN1` |
 | `sensor.house_color_order` | sensor | e.g. `RGBW (24V Natural White)` |
 | `sensor.house_location` | sensor | e.g. `Springfield, Illinois` |
+| `button.house_refresh_scenes` | button | Re-pull scenes/schedule from your account |
 
 > Replace `house` with your device's slug if it is named differently. Find the
 > exact IDs under **Settings → Devices & Services → Entities**.
@@ -245,7 +246,7 @@ the **Automations** view:
 
 ## Automations
 
-Five examples are in [`celebright_automations.yaml`](celebright_automations.yaml):
+Examples are in [`celebright_automations.yaml`](celebright_automations.yaml):
 
 | Automation | What it does |
 |---|---|
@@ -254,6 +255,7 @@ Five examples are in [`celebright_automations.yaml`](celebright_automations.yaml
 | Halloween in October | A scene at sunset, second half of October |
 | Party toggle | Flips to a scene from an `input_boolean` helper |
 | Offline notify | Notifies if the controller goes unavailable |
+| Holiday week (dusk→dawn) | Shows a scene every night of the Mon–Sun week containing a date (e.g. July 1), every year |
 
 > The scene names in the file are **placeholders** (`REPLACE WITH YOUR SCENE
 > NAME`) — set them to your own saved scenes (the names in the scene dropdown).

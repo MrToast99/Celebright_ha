@@ -124,3 +124,63 @@
         title: Celebright offline
         message: "The Celebright controller has been unreachable for 5 minutes."
   mode: single
+
+# ---------------------------------------------------------------------
+# Holiday week — show a scene dusk-to-dawn for the whole (Mon-Sun) week
+# that contains a date, every year automatically.
+#
+# CUSTOMISE:
+#   • month=7, day=1  -> change to your holiday's date (both appear once
+#                        in the template below). e.g. Christmas = month=12, day=25
+#   • "REPLACE WITH YOUR SCENE NAME"  -> your scene (appears twice; the second
+#                        is the state-check, must match the first exactly)
+#   • alias            -> a friendly name
+#
+# How it works: the template is true only on days in the same ISO week as the
+# date, so it recurs every year with no editing. The sunrise "off" branch keys
+# off the scene's state, so it correctly ends the night even when it spans into
+# the following week.
+# ---------------------------------------------------------------------
+- id: celebright_holiday_week
+  alias: Celebright holiday week (dusk to dawn)
+  description: >
+    Show a scene from sunset to sunrise for every night of the ISO week that
+    contains a chosen date. Recurs yearly.
+  triggers:
+    - trigger: sun
+      event: sunset
+      id: dusk
+    - trigger: sun
+      event: sunrise
+      id: dawn
+  conditions: []
+  actions:
+    - choose:
+        # Sunset during the target week -> turn the scene on
+        - conditions:
+            - condition: trigger
+              id: dusk
+            - condition: template
+              value_template: >
+                {{ now().isocalendar()[1] ==
+                   now().replace(month=7, day=1).isocalendar()[1] }}
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "REPLACE WITH YOUR SCENE NAME"
+        # Sunrise while our scene is showing -> hand back to the schedule
+        - conditions:
+            - condition: trigger
+              id: dawn
+            - condition: state
+              entity_id: select.house_scene
+              state: "REPLACE WITH YOUR SCENE NAME"
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "Off"
+  mode: single

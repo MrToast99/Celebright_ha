@@ -281,3 +281,11 @@ delete_event:
       required: false
       selector:
         text:
+
+refresh_scenes:
+  name: Refresh scenes
+  description: >
+    Re-pull the saved scene list (and schedule) from your Celebright account for
+    all configured devices. Use after adding, renaming, or deleting scenes in the
+    Celebright app so Home Assistant picks them up without a reload. (Scenes also
+    auto-refresh every 30 minutes.)

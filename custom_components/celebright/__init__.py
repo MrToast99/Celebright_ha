@@ -9,7 +9,13 @@ from .const import DOMAIN
 from .coordinator import CelebrightCoordinator
 from .services import async_register_services, async_unregister_services
 
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.LIGHT, Platform.SELECT, Platform.SENSOR]
+PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.LIGHT,
+    Platform.SELECT,
+    Platform.SENSOR,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

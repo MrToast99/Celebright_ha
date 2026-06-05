@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -12,6 +13,9 @@ from .api import CelebrightCloudAPI, CelebrightConnectionError, DeviceInfo, Devi
 from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN, SCAN_INTERVAL_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
+
+# Scenes/schedule change rarely — auto-refresh them at most this often (seconds).
+SCENE_REFRESH_INTERVAL = 1800  # 30 minutes
 
 
 class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
@@ -34,6 +38,8 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         self.scenes: dict[str, list[SceneInfo]] = {}
         # Optimistic active-scene tracking — device_id → scene_uuid | None
         self._active_scenes: dict[str, str | None] = {}
+        # When scenes/device-info were last pulled (monotonic seconds)
+        self._last_scene_refresh: float = 0.0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -46,6 +52,7 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         self.device_infos = dict(self.client._device_infos)
         for device_id in self.device_infos:
             await self._fetch_scenes(device_id)
+        self._last_scene_refresh = time.monotonic()
 
     async def async_shutdown(self) -> None:
         await self.client.async_disconnect()
@@ -65,6 +72,10 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
                 self._active_scenes[device_id] = None
             elif device_id in self._active_scenes:
                 state.active_scene_uuid = self._active_scenes[device_id]
+
+        # Periodically pick up scene/schedule changes made in the Celebright app.
+        if time.monotonic() - self._last_scene_refresh >= SCENE_REFRESH_INTERVAL:
+            await self._refresh_all(notify=False)
 
         return statuses
 
@@ -96,6 +107,29 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
 
     def set_active_scene(self, device_id: str, scene_uuid: str | None) -> None:
         self._active_scenes[device_id] = scene_uuid
+
+    # ------------------------------------------------------------------
+    # Refresh (scenes + device info/schedule)
+    # ------------------------------------------------------------------
+
+    async def async_refresh_scenes(self) -> None:
+        """Manually re-pull scene lists (and device info/schedule) from the account."""
+        await self._refresh_all(notify=True)
+
+    async def _refresh_all(self, notify: bool) -> None:
+        """Re-fetch device infos and scene lists for all devices."""
+        try:
+            self.device_infos = dict(await self.client.async_get_device_infos())
+            for device_id in self.device_infos:
+                await self._fetch_scenes(device_id)
+            self._last_scene_refresh = time.monotonic()
+            _LOGGER.debug("Refreshed scenes/device info for %d device(s)", len(self.device_infos))
+        except Exception as err:  # noqa: BLE001 - refresh is best-effort
+            _LOGGER.warning("Scene refresh failed: %s", err)
+            # Back off so a failing refresh doesn't hammer the API every poll
+            self._last_scene_refresh = time.monotonic()
+        if notify:
+            self.async_update_listeners()
 
     # ------------------------------------------------------------------
     # Schedule writes

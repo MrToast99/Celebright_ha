@@ -20,6 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 SERVICE_CREATE_EVENT = "create_event"
 SERVICE_UPDATE_EVENT = "update_event"
 SERVICE_DELETE_EVENT = "delete_event"
+SERVICE_REFRESH_SCENES = "refresh_scenes"
 
 # Recurrence frequency: 1 = one-time / seasonal range, 4 = yearly (matches the app)
 _WEEKDAYS = {"MO", "TU", "WE", "TH", "FR", "SA", "SU"}
@@ -199,6 +200,15 @@ def async_register_services(hass: HomeAssistant) -> None:
         ack = await coord.async_delete_event(device_id, event_uuid)
         return {"deleted": ack}
 
+    async def _handle_refresh_scenes(call: ServiceCall) -> None:
+        # Refresh every loaded Celebright coordinator (no target needed).
+        seen: set[int] = set()
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            coord = getattr(entry, "runtime_data", None)
+            if isinstance(coord, CelebrightCoordinator) and id(coord) not in seen:
+                seen.add(id(coord))
+                await coord.async_refresh_scenes()
+
     hass.services.async_register(
         DOMAIN, SERVICE_CREATE_EVENT, _handle_create_event,
         schema=CREATE_EVENT_SCHEMA, supports_response=SupportsResponse.OPTIONAL,
@@ -211,10 +221,18 @@ def async_register_services(hass: HomeAssistant) -> None:
         DOMAIN, SERVICE_DELETE_EVENT, _handle_delete_event,
         schema=DELETE_EVENT_SCHEMA, supports_response=SupportsResponse.OPTIONAL,
     )
+    hass.services.async_register(
+        DOMAIN, SERVICE_REFRESH_SCENES, _handle_refresh_scenes,
+    )
 
 
 def async_unregister_services(hass: HomeAssistant) -> None:
     """Remove services when the last entry unloads."""
     if not hass.config_entries.async_entries(DOMAIN):
-        for svc in (SERVICE_CREATE_EVENT, SERVICE_UPDATE_EVENT, SERVICE_DELETE_EVENT):
+        for svc in (
+            SERVICE_CREATE_EVENT,
+            SERVICE_UPDATE_EVENT,
+            SERVICE_DELETE_EVENT,
+            SERVICE_REFRESH_SCENES,
+        ):
             hass.services.async_remove(DOMAIN, svc)
