@@ -28,64 +28,252 @@
 #     because the reference device is named "House". If yours differs, Find &
 #     Replace  house  ->  your_slug  (Settings -> Devices & Services -> Entities,
 #     search "celebright" to find it, e.g. select.front_yard_scene -> front_yard).
-#  2. SCENE NAMES: the "REPLACE WITH YOUR SCENE NAME" placeholders -> your own
-#     saved scene names exactly as they appear in the scene dropdown.
+#  2. SCENE NAMES: replace every "REPLACE WITH YOUR SCENE NAME" placeholder with
+#     your own saved scene names exactly as they appear in the scene dropdown.
 # =====================================================================
 
-- id: celebright_scene_at_sunset
-  alias: Celebright scene at sunset (December)
-  description: Activate a holiday scene every evening at sunset during December.
+
+# =====================================================================
+# HOLIDAY LIGHTING CONTROLLER
+# =====================================================================
+# Single automation that owns all scheduled lighting. Any trigger
+# re-evaluates the current date/time and picks the highest-priority
+# rule that matches. The 30-minute time_pattern trigger re-asserts the
+# active scene if the Celebright device's own schedule overrides it
+# mid-night (e.g. a device-side "Architecture" event at 4 AM).
+#
+# If you use this controller:
+#  - DISABLE or DELETE celebright_scene_at_sunset,
+#    celebright_halloween_october, and celebright_holiday_week from this
+#    file (or remove them from HA). They will conflict.
+#  - celebright_lights_off_late_night is also superseded — the
+#    controller's default branch handles "Off" at night.
+#
+# SCENE NAME placeholders to fill in (search "REPLACE"):
+#  - Your December / Christmas scene
+#  - Your New Year / fireworks scene
+#  - Your aurora scene (the entity for aurora visibility is below too)
+#  - Your Easter scene
+#  - Your orange/orange-shirt scene (Truth & Reconciliation)
+#  Scene names that already reference your account:
+#    "St Patrick's", "Canada Day", "Autumn Thanksgiving",
+#    "Remembrance Day Poppies" — update these to match your scene names.
+# =====================================================================
+- id: celebright_holiday_controller
+  alias: Celebright holiday lighting controller
+  description: >
+    One decision point for the House lights. Any trigger re-evaluates and
+    sets a single winning scene by priority (top = highest).
+    Daytime / sunrise hands control back to the device schedule.
+    Runs every 30 minutes so device-side scheduled events cannot hold the
+    lights away from the active holiday scene.
   triggers:
     - trigger: sun
       event: sunset
-  conditions:
-    - condition: template
-      value_template: "{{ now().month == 12 }}"
-  actions:
-    - action: select.select_option
-      target:
-        entity_id: select.house_scene
-      data:
-        option: "REPLACE WITH YOUR SCENE NAME"
-  mode: single
-
-- id: celebright_lights_off_late_night
-  alias: Celebright lights off late night
-  description: Resume the controller schedule (turn off manual override) at 11:30 PM.
-  triggers:
+      id: dusk
+    - trigger: sun
+      event: sunrise
+      id: dawn
     - trigger: time
-      at: "23:30:00"
+      at: "00:00:00"       # midnight re-evaluation + New Year window start
+    - trigger: time
+      at: "00:15:00"       # New Year fireworks end
+    - trigger: numeric_state
+      entity_id: sensor.home_aurora_visibility   # <-- your aurora sensor
+      above: 78
+    - trigger: numeric_state
+      entity_id: sensor.home_aurora_visibility
+      below: 78
+    - trigger: time_pattern
+      minutes: "/30"       # re-assert every 30 min; defeats device schedule overrides
+  conditions: []
   actions:
-    - action: select.select_option
-      target:
-        entity_id: select.house_scene
-      data:
-        option: "Off"
-  mode: single
+    - choose:
 
-- id: celebright_halloween_october
-  alias: Celebright Halloween in October
-  description: Activate a scene at sunset for the second half of October.
-  triggers:
-    - trigger: sun
-      event: sunset
-  conditions:
-    - condition: template
-      value_template: "{{ now().month == 10 and now().day >= 15 }}"
-  actions:
-    - action: select.select_option
-      target:
-        entity_id: select.house_scene
-      data:
-        option: "REPLACE WITH YOUR SCENE NAME"
-  mode: single
+        # ── Daytime / sunrise → hand back to the device schedule ──────────
+        # IMPORTANT: the dusk trigger is explicitly excluded here.
+        # At the exact moment the sunset trigger fires, sun.sun may still
+        # report "above_horizon" (state update races the event). Without
+        # the exclusion, the daytime branch would match at sunset and set
+        # "Off", letting the device play its built-in schedule all night
+        # instead of the holiday scene. The midnight trigger then corrects
+        # it — but that leaves a sunset→midnight gap with the wrong scene.
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: trigger
+                  id: dawn
+                - condition: and
+                  conditions:
+                    - condition: not
+                      conditions:
+                        - condition: trigger
+                          id: dusk
+                    - condition: state
+                      entity_id: sun.sun
+                      state: "above_horizon"
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "Off"
+
+        # ── Special timed event: New Year fireworks (Jan 1, 00:00–00:15) ─
+        # Highest night-time priority — beats aurora.
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ now().month == 1 and now().day == 1
+                   and now().hour == 0 and now().minute < 15 }}
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "REPLACE WITH YOUR NEW YEAR SCENE"
+
+        # ── Aurora (overrides month-long and week-long) ───────────────────
+        - conditions:
+            - condition: numeric_state
+              entity_id: sensor.home_aurora_visibility
+              above: 78
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "REPLACE WITH YOUR AURORA SCENE"
+
+        # ── Month-long: all of December ───────────────────────────────────
+        - conditions:
+            - condition: template
+              value_template: "{{ now().month == 12 }}"
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "REPLACE WITH YOUR DECEMBER SCENE"
+
+        # ── Week-long (ISO Mon–Sun week that contains the date) ───────────
+
+        # St. Patrick's Day — Mar 17
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ now().isocalendar()[1] ==
+                   now().replace(month=3, day=17).isocalendar()[1] }}
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "St Patrick's"
+
+        # Canada Day — Jul 1
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ now().isocalendar()[1] ==
+                   now().replace(month=7, day=1).isocalendar()[1] }}
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "Canada Day"
+
+        # Canadian Thanksgiving — 2nd Monday of October (computed)
+        - conditions:
+            - condition: template
+              value_template: >
+                {% set oct1 = now().replace(month=10, day=1) %}
+                {% set first_mon = 1 + (7 - oct1.weekday()) % 7 %}
+                {% set thanks = now().replace(month=10, day=first_mon + 7) %}
+                {{ now().isocalendar()[1] == thanks.isocalendar()[1] }}
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "Autumn Thanksgiving"
+
+        # Remembrance Day — Nov 11
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ now().isocalendar()[1] ==
+                   now().replace(month=11, day=11).isocalendar()[1] }}
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "Remembrance Day Poppies"
+
+        # Easter Monday — moveable feast (Gregorian Computus + 1 day)
+        - conditions:
+            - condition: template
+              value_template: >
+                {% set y = now().year %}
+                {% set a = y % 19 %}
+                {% set b = y // 100 %}
+                {% set c = y % 100 %}
+                {% set d = b // 4 %}
+                {% set e = b % 4 %}
+                {% set f = (b + 8) // 25 %}
+                {% set g = (b - f + 1) // 3 %}
+                {% set h = (19*a + b - d - g + 15) % 30 %}
+                {% set i = c // 4 %}
+                {% set k = c % 4 %}
+                {% set l = (32 + 2*e + 2*i - h - k) % 7 %}
+                {% set m = (a + 11*h + 22*l) // 451 %}
+                {% set mon = (h + l - 7*m + 114) // 31 %}
+                {% set day = ((h + l - 7*m + 114) % 31) + 1 %}
+                {% set emonday = now().replace(month=mon, day=day, hour=12,
+                   minute=0, second=0, microsecond=0) + timedelta(days=1) %}
+                {{ now().isocalendar()[1] == emonday.isocalendar()[1] }}
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "REPLACE WITH YOUR EASTER SCENE"
+
+        # National Day for Truth & Reconciliation — Sep 30
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ now().isocalendar()[1] ==
+                   now().replace(month=9, day=30).isocalendar()[1] }}
+          sequence:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "REPLACE WITH YOUR ORANGE SCENE"
+
+      # Night with no holiday active → hand back to the schedule
+      default:
+        - action: select.select_option
+          target:
+            entity_id: select.house_scene
+          data:
+            option: "Off"
+  mode: restart
+
+
+# =====================================================================
+# UTILITY AUTOMATIONS (safe to keep alongside the controller above)
+# =====================================================================
 
 - id: celebright_party_toggle
   alias: Celebright party mode on input boolean
   description: >
-    Triggering a scene from a helper toggle. Create an input_boolean.party_mode
-    helper, then this flips the lights to your party scene when it's on and back
-    to the schedule when off.
+    Trigger a scene from a helper toggle. Create an input_boolean.party_mode
+    helper, then this flips the lights to your party scene when it's on and
+    back to the schedule when off.
   triggers:
     - trigger: state
       entity_id: input_boolean.party_mode
@@ -100,7 +288,7 @@
               target:
                 entity_id: select.house_scene
               data:
-                option: "REPLACE WITH YOUR SCENE NAME"
+                option: "REPLACE WITH YOUR PARTY SCENE NAME"
       default:
         - action: select.select_option
           target:
@@ -125,27 +313,61 @@
         message: "The Celebright controller has been unreachable for 5 minutes."
   mode: single
 
-# ---------------------------------------------------------------------
-# Holiday week — show a scene dusk-to-dawn for the whole (Mon-Sun) week
-# that contains a date, every year automatically.
-#
-# CUSTOMISE:
-#   • month=7, day=1  -> change to your holiday's date (both appear once
-#                        in the template below). e.g. Christmas = month=12, day=25
-#   • "REPLACE WITH YOUR SCENE NAME"  -> your scene (appears twice; the second
-#                        is the state-check, must match the first exactly)
-#   • alias            -> a friendly name
-#
-# How it works: the template is true only on days in the same ISO week as the
-# date, so it recurs every year with no editing. The sunrise "off" branch keys
-# off the scene's state, so it correctly ends the night even when it spans into
-# the following week.
-# ---------------------------------------------------------------------
-- id: celebright_holiday_week
-  alias: Celebright holiday week (dusk to dawn)
+
+# =====================================================================
+# SIMPLE SEASONAL EXAMPLES
+# =====================================================================
+# These are standalone alternatives to the holiday controller above.
+# Use EITHER the controller OR these — NOT both. If the controller is
+# active, disable these three automations in HA (Settings → Automations
+# → three-dot menu → Disable).
+# =====================================================================
+
+- id: celebright_scene_at_sunset
+  alias: Celebright scene at sunset (December)
   description: >
-    Show a scene from sunset to sunrise for every night of the ISO week that
-    contains a chosen date. Recurs yearly.
+    [SIMPLE ALTERNATIVE — disable if using the holiday controller above]
+    Activate a holiday scene every evening at sunset during December.
+  triggers:
+    - trigger: sun
+      event: sunset
+  conditions:
+    - condition: template
+      value_template: "{{ now().month == 12 }}"
+  actions:
+    - action: select.select_option
+      target:
+        entity_id: select.house_scene
+      data:
+        option: "REPLACE WITH YOUR SCENE NAME"
+  mode: single
+
+- id: celebright_halloween_october
+  alias: Celebright Halloween in October
+  description: >
+    [SIMPLE ALTERNATIVE — disable if using the holiday controller above]
+    Activate a scene at sunset for the second half of October.
+  triggers:
+    - trigger: sun
+      event: sunset
+  conditions:
+    - condition: template
+      value_template: "{{ now().month == 10 and now().day >= 15 }}"
+  actions:
+    - action: select.select_option
+      target:
+        entity_id: select.house_scene
+      data:
+        option: "REPLACE WITH YOUR SCENE NAME"
+  mode: single
+
+- id: celebright_holiday_week
+  alias: Celebright holiday week — single date (dusk to dawn)
+  description: >
+    [SIMPLE ALTERNATIVE — disable if using the holiday controller above]
+    Show a scene from sunset to sunrise for every night of the ISO week
+    that contains a chosen date. Recurs yearly.
+    Change month=7, day=1 to your holiday's date (appears once below).
   triggers:
     - trigger: sun
       event: sunset
@@ -156,7 +378,6 @@
   conditions: []
   actions:
     - choose:
-        # Sunset during the target week -> turn the scene on
         - conditions:
             - condition: trigger
               id: dusk
@@ -170,7 +391,6 @@
                 entity_id: select.house_scene
               data:
                 option: "REPLACE WITH YOUR SCENE NAME"
-        # Sunrise while our scene is showing -> hand back to the schedule
         - conditions:
             - condition: trigger
               id: dawn
@@ -183,4 +403,22 @@
                 entity_id: select.house_scene
               data:
                 option: "Off"
+  mode: single
+
+- id: celebright_lights_off_late_night
+  alias: Celebright lights off late night
+  description: >
+    [SIMPLE ALTERNATIVE — disable if using the holiday controller above]
+    Resume the controller schedule at 11:30 PM. The holiday controller's
+    default branch already handles "Off" at night, so this is only needed
+    as a standalone fallback.
+  triggers:
+    - trigger: time
+      at: "23:30:00"
+  actions:
+    - action: select.select_option
+      target:
+        entity_id: select.house_scene
+      data:
+        option: "Off"
   mode: single
