@@ -18,6 +18,7 @@ from .base import (
     CelebrightAuthError,
     CelebrightCommandError,
     CelebrightConnectionError,
+    CelebrightError,
     DeviceInfo,
     DeviceState,
     EventInfo,
@@ -33,6 +34,9 @@ from ..const import (
     EP_GET_DEVICE_STATUSES,
     EP_GET_USER_DATA,
     IOT_ENDPOINT,
+    MQTT_ACTIVE_SCENE_FIELD,
+    MQTT_STATE_BRIGHTNESS_FIELD,
+    MQTT_STATE_COLOR_FIELD,
     SCHEDULE_ENABLED_FIELD,
     STATE_FIELD,
     STATUS_FIELD,
@@ -171,6 +175,37 @@ def _parse_device_status(
     return state
 
 
+def _merge_system_state(state: DeviceState, system_state: dict[str, Any]) -> None:
+    """Merge an MQTT systemState payload onto a DeviceState, best-effort.
+
+    Only the active-scene field is confirmed against a live capture; color and
+    brightness are populated opportunistically and simply left as None if the
+    expected keys aren't present (see the field-name caveat in const.py).
+    """
+    if not system_state:
+        return
+
+    state.active_scene_uuid = system_state.get(MQTT_ACTIVE_SCENE_FIELD) or None
+
+    color = system_state.get(MQTT_STATE_COLOR_FIELD)
+    if isinstance(color, str) and len(color) >= 6:
+        hex_color = color.lstrip("#").upper()
+        state.color_hex = hex_color
+        try:
+            r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            pass
+        else:
+            # The device has no independent brightness channel — setColor bakes
+            # brightness into the RGB magnitude — so derive it from the color
+            # unless the device separately reports one below.
+            state.brightness = max(r, g, b)
+
+    brightness = system_state.get(MQTT_STATE_BRIGHTNESS_FIELD)
+    if isinstance(brightness, (int, float)):
+        state.brightness = int(brightness)
+
+
 def _mqtt_for_device(device_id: str, auth: CelebrightAuth) -> CelebrightMQTT:
     creds = auth.aws_credentials
     return CelebrightMQTT(
@@ -215,10 +250,14 @@ class CelebrightCloudAPI(CelebrightAPIBase):
     async def async_get_device_infos(self) -> dict[str, DeviceInfo]:
         data = await self._post(EP_GET_USER_DATA, {"email": self._email})
         devices: dict[str, Any] = data.get("devices", {})
-        return {
+        # Keep self._device_infos in sync on every call (not just the initial
+        # connect) — async_get_device_statuses() merges name/model/num_leds/
+        # is_rgbw from this cache, and it must reflect the latest refresh.
+        self._device_infos = {
             dev_id: _parse_device_info(dev_id, dev_raw)
             for dev_id, dev_raw in devices.items()
         }
+        return self._device_infos
 
     async def async_get_scenes(self, device_id: str) -> list[SceneInfo]:
         data = await self._post(EP_GET_DEVICE_SCENES, {"deviceId": device_id})
@@ -230,12 +269,30 @@ class CelebrightCloudAPI(CelebrightAPIBase):
 
     async def async_get_device_statuses(self) -> dict[str, DeviceState]:
         data = await self._post(EP_GET_DEVICE_STATUSES, {})
-        return {
+        statuses = {
             dev_id: _parse_device_status(
                 dev_id, status_raw, self._device_infos.get(dev_id)
             )
             for dev_id, status_raw in data.items()
         }
+
+        # Color/brightness/active-scene aren't in the REST payload — pull them
+        # from MQTT systemState for devices that are actually on. Best-effort:
+        # a device that's slow or briefly unreachable shouldn't fail the whole poll.
+        assert self._auth
+        await self._auth.async_ensure_valid()
+        for device_id, state in statuses.items():
+            if not state.available or not state.is_on:
+                continue
+            try:
+                mqtt = _mqtt_for_device(device_id, self._auth)
+                system_state = await mqtt.async_get_system_state()
+            except CelebrightError as err:
+                _LOGGER.debug("systemState fetch failed for %s: %s", device_id, err)
+                continue
+            _merge_system_state(state, system_state)
+
+        return statuses
 
     # ------------------------------------------------------------------
     # Write (MQTT)

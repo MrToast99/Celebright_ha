@@ -30,7 +30,12 @@ MQTT_CMD_LOAD_SCENE = "loadSavedScene"        # payload: {"savedSceneUuid": "<uu
 MQTT_CMD_RESUME_SCHEDULE = "setResumeSchedule"  # payload: {}
 MQTT_CMD_GET_STATE = "getSystemState"         # payload: {"UTCTimeFromApp": epoch_int}
 MQTT_STATE_SUBTOPIC = "systemState"           # inbound: devices/{id}/v2/device/systemState
-MQTT_ACTIVE_SCENE_FIELD = "activeSavedScene"  # UUID in systemState when a scene is active
+MQTT_ACTIVE_SCENE_FIELD = "activeSavedScene"  # UUID in systemState when a scene is active — confirmed via HAR
+# NOT confirmed against a live systemState capture — inferred from the setColor
+# command using the same field name ("color") for its payload. If a real
+# capture shows different keys, update these two.
+MQTT_STATE_COLOR_FIELD = "color"              # RRGGBB hex string, if present
+MQTT_STATE_BRIGHTNESS_FIELD = "brightness"    # 0-255, if the device reports it separately
 
 # Device status field names (getUserDeviceStatuses response)
 STATUS_FIELD = "Status"

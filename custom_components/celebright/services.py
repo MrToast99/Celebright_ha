@@ -34,14 +34,17 @@ _EVENT_FIELDS = {
     vol.Required("end_date"): cv.string,
     vol.Required("start_time"): cv.string,  # sunset|sunrise|midnight|HH:MM
     vol.Required("end_time"): cv.string,
-    vol.Optional("priority", default=3): vol.All(int, vol.Range(min=1, max=4)),
-    vol.Optional("frequency", default=1): vol.In([1, 4]),
+    vol.Optional("priority", default=3): vol.All(vol.Coerce(int), vol.Range(min=1, max=4)),
+    # The GUI "frequency" field is a select selector, which always submits its
+    # option value as a string ("1"/"4") — vol.Coerce lets that and a bare int
+    # (from YAML) both validate.
+    vol.Optional("frequency", default=1): vol.All(vol.Coerce(int), vol.In([1, 4])),
     vol.Optional("interval", default=1): cv.positive_int,
     vol.Optional("repeat_until"): cv.string,
     vol.Optional("by_day"): cv.string,
-    vol.Optional("by_month"): vol.All(int, vol.Range(min=1, max=12)),
-    vol.Optional("by_month_day"): vol.All(int, vol.Range(min=1, max=31)),
-    vol.Optional("by_set_pos"): vol.All(int, vol.Range(min=-1, max=5)),
+    vol.Optional("by_month"): vol.All(vol.Coerce(int), vol.Range(min=1, max=12)),
+    vol.Optional("by_month_day"): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
+    vol.Optional("by_set_pos"): vol.All(vol.Coerce(int), vol.Range(min=-1, max=5)),
 }
 
 CREATE_EVENT_SCHEMA = vol.Schema(_EVENT_FIELDS)

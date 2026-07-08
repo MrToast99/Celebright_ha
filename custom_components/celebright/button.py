@@ -1,7 +1,7 @@
 """Celebright button platform — manual refresh of scenes/schedule."""
 from __future__ import annotations
 
-from homeassistant.components.button import ButtonEntity, ButtonEntityClass
+from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -27,7 +27,7 @@ class CelebrightRefreshButton(CelebrightEntity, ButtonEntity):
     """Pulls the latest scene list (and schedule) from the Celebright account."""
 
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_device_class = ButtonEntityClass.UPDATE
+    _attr_device_class = ButtonDeviceClass.UPDATE
     _attr_icon = "mdi:refresh"
 
     def __init__(self, coordinator: CelebrightCoordinator, device_id: str) -> None:

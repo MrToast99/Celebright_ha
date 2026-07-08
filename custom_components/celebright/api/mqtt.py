@@ -35,6 +35,16 @@ from .base import CelebrightCommandError, CelebrightConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
+# aiohttp keeps returning one of these immediately (no blocking) once the
+# WebSocket is closed — without treating them as terminal, a receive loop
+# would spin hot until its deadline instead of failing fast.
+_TERMINAL_WS_TYPES = {
+    aiohttp.WSMsgType.CLOSE,
+    aiohttp.WSMsgType.CLOSING,
+    aiohttp.WSMsgType.CLOSED,
+    aiohttp.WSMsgType.ERROR,
+}
+
 # -----------------------------------------------------------------------
 # SigV4 URL presigning
 # -----------------------------------------------------------------------
@@ -355,6 +365,8 @@ class CelebrightMQTT:
                     except asyncio.TimeoutError:
                         break
 
+                    if msg.type in _TERMINAL_WS_TYPES:
+                        break
                     if msg.type != aiohttp.WSMsgType.BINARY:
                         continue
 
@@ -420,6 +432,10 @@ class CelebrightMQTT:
                             msg = await ws.receive()
                     except asyncio.TimeoutError:
                         break
+                    if msg.type in _TERMINAL_WS_TYPES:
+                        raise CelebrightCommandError(
+                            f"{command}: IoT WebSocket closed while waiting ({msg.type})"
+                        )
                     if msg.type != aiohttp.WSMsgType.BINARY:
                         continue
                     parsed = parse_incoming(msg.data)

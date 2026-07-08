@@ -1,6 +1,9 @@
 """Celebright integration for Home Assistant."""
 from __future__ import annotations
 
+import asyncio
+import importlib
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -24,6 +27,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
+
+    # If this is the first entity of a given platform (e.g. "button") ever
+    # registered in this HA instance, importing homeassistant.components.<platform>
+    # does blocking file I/O. Pre-warm each one in the import executor so the
+    # import async_forward_entry_setups triggers below is a cheap sys.modules
+    # hit instead of a blocking call on the event loop.
+    await asyncio.gather(
+        *(
+            hass.async_add_import_executor_job(
+                importlib.import_module, f"homeassistant.components.{platform.value}"
+            )
+            for platform in PLATFORMS
+        )
+    )
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(coordinator.async_shutdown)
 
