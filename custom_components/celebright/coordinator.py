@@ -70,6 +70,13 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         for device_id, state in statuses.items():
             if not state.is_on:
                 self._active_scenes[device_id] = None
+            elif state.active_scene_uuid is not None:
+                # Real MQTT-reported value — authoritative. Keep the optimistic
+                # cache in sync so a later poll that can't reach MQTT falls back
+                # to the last known-good real value instead of a stale
+                # HA-initiated selection that may no longer be what's showing
+                # (e.g. the device's own schedule took over in the meantime).
+                self._active_scenes[device_id] = state.active_scene_uuid
             elif device_id in self._active_scenes:
                 state.active_scene_uuid = self._active_scenes[device_id]
 
