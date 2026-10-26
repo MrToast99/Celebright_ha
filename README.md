@@ -2,7 +2,7 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration for **Celebright** permanent / architectural LED lighting (CLC-series controllers). Control your lights, activate saved scenes, manage the built-in schedule, and automate it all from Home Assistant.
 
-> **Status:** `0.3.0`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
+> **Status:** `0.3.1`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
 
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/latest/total)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/total?label=downloads%40total)
@@ -41,7 +41,7 @@ Like the work? Help keep me Caffeinated!
 |---|---|---|
 | On / off | `light.*` | |
 | Solid colour, brightness | `light.*` | RGB picker, 0–255 |
-| Scene selection | `select.*` | Your saved scenes, plus **Off** (resume the schedule) |
+| Scene selection | `select.*`, `scene.*` | Your saved scenes (a dropdown and one scene entity each), plus **Off** (resume the schedule) |
 | Current display, active event, next event | `sensor.*` | Live |
 | Schedule on/off | `switch.*`, `binary_sensor.*` | |
 | Schedule events | `sensor.*` | Count + decoded list; create / edit / delete / enable via services |
@@ -105,6 +105,7 @@ For a controller named **House**:
 |---|---|
 | `light.house` | On/off, RGB colour, brightness |
 | `select.house_scene` | Pick a saved scene, or **Off** (resume the schedule) |
+| `scene.house_<scene name>` | One per saved scene: activate it from automations, scripts, dashboards or voice. Appears and disappears as you add and delete scenes in the app |
 | `sensor.house_current_display` | Active scene, or "Off" |
 | `sensor.house_active_event` | Scheduled event playing now (`None` if none) |
 | `sensor.house_next_event_start` | When the next event starts (controller's local time) |
@@ -187,19 +188,18 @@ Not in the default dashboard. A card showing `Custom element doesn't exist` mean
 
 ## Automations
 
-Automations come as **blueprints**: you pick your controller and type scene names in a form, with nothing to edit (needs Home Assistant 2024.10+). Click **Import**, then **Settings → Automations & Scenes → Blueprints →** the blueprint **→ Create automation**. Re-import a blueprint to get updates.
+Automations come as **blueprints**: you pick your controller and scenes from dropdowns, with nothing to edit (needs Home Assistant 2024.10+). Click **Import**, then **Settings → Automations & Scenes → Blueprints →** the blueprint **→ Create automation**. Re-import a blueprint to get updates.
 
 | Blueprint | What it does | |
 |---|---|---|
-| **Holiday lighting controller** | One automation for New Year fireworks, an optional aurora alert, December and week-long holidays (St. Patrick's, Canada Day, Canadian Thanksgiving, Remembrance Day, Easter Monday, Truth and Reconciliation). Leave a holiday's scene blank to skip it. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fholiday_lighting_controller.yaml) |
+| **Holiday lighting controller** | One automation for New Year fireworks, an optional aurora alert, December and week-long holidays (St. Patrick's, Canada Day, Canadian Thanksgiving, Remembrance Day, Easter Monday, Truth and Reconciliation). Leave a holiday's scene empty to skip it. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fholiday_lighting_controller.yaml) |
 | **Scene at sunset during a date range** | A scene every night from sunset inside a yearly date range (may cross New Year); resumes the schedule at sunrise. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_in_date_range.yaml) |
 | **Scene for a holiday week** | A scene dusk to dawn for the Monday-Sunday week containing a date, every year. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_for_holiday_week.yaml) |
 | **Scene on a toggle** | A scene while an `input_boolean` is on; resumes the schedule when it turns off. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_toggle.yaml) |
 | **Resume the schedule at a time** | Hands control back to the schedule at a set time each day. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fresume_schedule_at_time.yaml) |
 | **Controller offline notification** | Runs an action (a notification by default) when the controller has been unavailable for a while. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fcontroller_offline_notify.yaml) |
 
-- Type scene names exactly as they appear in the scene dropdown.
-- The *resume-schedule option* defaults to `Off`, the dropdown entry that hands control back to the schedule.
+- Scenes are picked from your saved scenes (each one is a `scene.*` entity). Resuming the schedule uses the controller's scene dropdown, so pick it too.
 - Use the holiday controller **instead of** the date-range / holiday-week blueprints for the same lights; they would compete.
 - No import button? Paste the blueprint's GitHub URL into **Blueprints → Import Blueprint**. The files are in [`blueprints/automation/celebright`](blueprints/automation/celebright).
 

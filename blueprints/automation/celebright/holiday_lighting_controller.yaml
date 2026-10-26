@@ -17,18 +17,12 @@ blueprint:
       input:
         scene_select:
           name: Scene selector
-          description: Your controller's scene dropdown.
+          description: Your controller's scene dropdown (used to resume the schedule).
           selector:
             entity:
               filter:
                 - domain: select
                   integration: celebright
-        off_option:
-          name: Resume-schedule option
-          description: The dropdown option that hands control back to the schedule.
-          default: "Off"
-          selector:
-            text:
     aurora:
       name: Aurora alert
       icon: mdi:weather-night
@@ -53,55 +47,82 @@ blueprint:
               mode: box
         aurora_scene:
           name: Aurora scene
-          description: Scene name exactly as in the dropdown.
+          description: Optional. The scene to show.
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
     holidays:
       name: Holiday scenes
       icon: mdi:calendar-star
-      description: Scene names exactly as in the dropdown. Leave blank to skip a holiday.
+      description: Pick a scene for each holiday. Leave one empty to skip it.
       input:
         new_year_scene:
           name: New Year fireworks (Jan 1, 00:00–00:15)
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
         december_scene:
           name: December (whole month)
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
         st_patricks_scene:
           name: St. Patrick's Day week (Mar 17)
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
         canada_day_scene:
           name: Canada Day week (Jul 1)
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
         thanksgiving_scene:
           name: Canadian Thanksgiving week (2nd Monday of October)
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
         remembrance_scene:
           name: Remembrance Day week (Nov 11)
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
         easter_scene:
           name: Easter Monday week
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
         truth_reconciliation_scene:
           name: National Day for Truth and Reconciliation week (Sep 30)
           default: ""
           selector:
-            text:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
 
 mode: restart
 
@@ -111,7 +132,6 @@ trigger_variables:
 
 variables:
   scene_select: !input scene_select
-  off_option: !input off_option
   aurora_sensor: !input aurora_sensor
   aurora_threshold: !input aurora_threshold
   aurora_scene: !input aurora_scene
@@ -206,85 +226,67 @@ actions:
             target:
               entity_id: !input scene_select
             data:
-              option: "{{ off_option }}"
+              option: "Off"
 
       # Night: the first matching rule wins (highest priority first).
       - alias: New Year fireworks
         conditions: "{{ new_year_scene != '' and new_year_window }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ new_year_scene }}"
+              entity_id: "{{ new_year_scene }}"
       - alias: Aurora alert
         conditions: "{{ aurora_scene != '' and aurora_active }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ aurora_scene }}"
+              entity_id: "{{ aurora_scene }}"
       - alias: December
         conditions: "{{ december_scene != '' and now().month == 12 }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ december_scene }}"
+              entity_id: "{{ december_scene }}"
       - alias: St. Patrick's Day week
         conditions: "{{ st_patricks_scene != '' and in_st_patricks }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ st_patricks_scene }}"
+              entity_id: "{{ st_patricks_scene }}"
       - alias: Canada Day week
         conditions: "{{ canada_day_scene != '' and in_canada_day }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ canada_day_scene }}"
+              entity_id: "{{ canada_day_scene }}"
       - alias: Canadian Thanksgiving week
         conditions: "{{ thanksgiving_scene != '' and in_thanksgiving }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ thanksgiving_scene }}"
+              entity_id: "{{ thanksgiving_scene }}"
       - alias: Remembrance Day week
         conditions: "{{ remembrance_scene != '' and in_remembrance }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ remembrance_scene }}"
+              entity_id: "{{ remembrance_scene }}"
       - alias: Easter Monday week
         conditions: "{{ easter_scene != '' and in_easter }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ easter_scene }}"
+              entity_id: "{{ easter_scene }}"
       - alias: Truth and Reconciliation week
         conditions: "{{ truth_reconciliation_scene != '' and in_truth_reconciliation }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ truth_reconciliation_scene }}"
+              entity_id: "{{ truth_reconciliation_scene }}"
     # Night with no holiday active: hand back to the schedule.
     default:
       - action: select.select_option
         target:
           entity_id: !input scene_select
         data:
-          option: "{{ off_option }}"
+          option: "Off"

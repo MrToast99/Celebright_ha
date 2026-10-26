@@ -18,7 +18,7 @@ blueprint:
             - domain: input_boolean
     scene_select:
       name: Scene selector
-      description: Your controller's scene dropdown.
+      description: Your controller's scene dropdown (used to resume the schedule).
       selector:
         entity:
           filter:
@@ -26,21 +26,14 @@ blueprint:
               integration: celebright
     scene:
       name: Scene
-      description: Scene name exactly as in the dropdown.
+      description: The scene to show while the toggle is on.
       selector:
-        text:
-    off_option:
-      name: Resume-schedule option
-      description: The dropdown option that hands control back to the schedule.
-      default: "Off"
-      selector:
-        text:
+        entity:
+          filter:
+            - domain: scene
+              integration: celebright
 
 mode: single
-
-variables:
-  scene: !input scene
-  off_option: !input off_option
 
 triggers:
   - trigger: state
@@ -50,8 +43,17 @@ triggers:
       - "off"
 
 actions:
-  - action: select.select_option
-    target:
-      entity_id: !input scene_select
-    data:
-      option: "{{ scene if trigger.to_state.state == 'on' else off_option }}"
+  - choose:
+      - alias: Toggle on - show the scene
+        conditions: "{{ trigger.to_state.state == 'on' }}"
+        sequence:
+          - action: scene.turn_on
+            target:
+              entity_id: !input scene
+    default:
+      - alias: Toggle off - resume the schedule
+        action: select.select_option
+        target:
+          entity_id: !input scene_select
+        data:
+          option: "Off"

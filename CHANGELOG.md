@@ -4,6 +4,18 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - Pending
+
+### Upgrading from 0.3.0
+Update in HACS and restart. Automations made from the Celebright blueprints need re-creating: their inputs changed (see below). Import the blueprints again, create the automation, and delete the old one. Nothing else changes; the new scene entities appear on their own.
+
+### Added
+- **Scene entities:** every saved scene gets a `scene.*` entity (activate it from automations, scripts, dashboards or voice). They follow the scenes in your account: new ones appear and deleted ones go on the next refresh.
+
+### Changed
+- **Blueprints pick scenes from dropdowns** (the scene entities) instead of asking you to type scene names. The *Resume-schedule option* input is gone; resuming always uses the scene dropdown's **Off**.
+- **The holiday controller's rules and triggers are named** (e.g. "Canada Day week", "Sunset"), so the automation editor and traces no longer show "Option 1, Option 2…".
+
 ## [0.3.0] - 2026-10-26
 
 ### Upgrading from 0.2.x
@@ -22,7 +34,7 @@ Existing dashboards and automations keep working: entity IDs, the saved login an
 - `celebright_automations.yaml` and `celebright_dashboard.yaml` are gone from the repository, replaced by blueprints and `generate_dashboard`. Disable an old copied holiday automation before using the holiday blueprint, or the two will compete.
 
 ### Added
-- **Automation blueprints** replace `celebright_automations.yaml`: holiday lighting controller (holiday scenes and the aurora alert optional), scene in a date range, scene for a holiday week, scene on a toggle, resume the schedule at a time, and controller-offline notification. Pick your controller and scene names in a form; no slug or placeholders to edit. Import from the README.
+- **Automation blueprints** replace `celebright_automations.yaml`: holiday lighting controller (holiday scenes and the aurora alert optional), scene in a date range, scene for a holiday week, scene on a toggle, resume the schedule at a time, and controller-offline notification. Pick your controller and type scene names in a form; no slug or placeholders to edit. Import from the README.
 - **`celebright.generate_dashboard`:** writes the dashboard with your real entity IDs and device name (found by unique ID, so renamed entities work). The `house` find-and-replace is gone; after an update, run the action again. The dashboard template now ships inside the integration, replacing the root `celebright_dashboard.yaml`.
 - **Re-authentication prompt** when Celebright rejects the saved login (e.g. a changed password), at startup or while running. Only a rejected login triggers it. Adds `translations/en.json`.
 - **Schedule editing on v3 (firmware 3.x):** `create_event`, `update_event` and `delete_event` use the app's event format and checksum. Each write waits for the controller's `databaseWrite` ack and is then confirmed by reading the event back from your account; a change that didn't take effect is reported as an error. Verified against the app's own traffic. v2 is unchanged.

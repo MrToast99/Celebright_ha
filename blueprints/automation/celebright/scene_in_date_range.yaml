@@ -11,7 +11,7 @@ blueprint:
   input:
     scene_select:
       name: Scene selector
-      description: Your controller's scene dropdown.
+      description: Your controller's scene dropdown (used to resume the schedule).
       selector:
         entity:
           filter:
@@ -19,9 +19,12 @@ blueprint:
               integration: celebright
     scene:
       name: Scene
-      description: Scene name exactly as in the dropdown.
+      description: The scene to show.
       selector:
-        text:
+        entity:
+          filter:
+            - domain: scene
+              integration: celebright
     start_month:
       name: Start month
       default: 12
@@ -54,19 +57,12 @@ blueprint:
           min: 1
           max: 31
           mode: box
-    off_option:
-      name: Resume-schedule option
-      description: The dropdown option that hands control back to the schedule.
-      default: "Off"
-      selector:
-        text:
 
 mode: single
 
 variables:
   scene_select: !input scene_select
   scene: !input scene
-  off_option: !input off_option
   start_month: !input start_month
   start_day: !input start_day
   end_month: !input end_month
@@ -89,16 +85,14 @@ actions:
   - choose:
       - conditions: "{{ trigger.id == 'dusk' and in_range }}"
         sequence:
-          - action: select.select_option
+          - action: scene.turn_on
             target:
-              entity_id: !input scene_select
-            data:
-              option: "{{ scene }}"
+              entity_id: !input scene
       # Sunrise: only if our scene is the one showing.
-      - conditions: "{{ trigger.id == 'dawn' and is_state(scene_select, scene) }}"
+      - conditions: "{{ trigger.id == 'dawn' and is_state(scene_select, state_attr(scene, 'scene_name')) }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
-              option: "{{ off_option }}"
+              option: "Off"

@@ -9,7 +9,7 @@ blueprint:
   input:
     scene_select:
       name: Scene selector
-      description: Your controller's scene dropdown.
+      description: Your controller's scene dropdown (used to resume the schedule).
       selector:
         entity:
           filter:
@@ -20,12 +20,6 @@ blueprint:
       default: "23:30:00"
       selector:
         time:
-    off_option:
-      name: Resume-schedule option
-      description: The dropdown option that hands control back to the schedule.
-      default: "Off"
-      selector:
-        text:
 
 mode: single
 
@@ -38,4 +32,4 @@ actions:
     target:
       entity_id: !input scene_select
     data:
-      option: !input off_option
+      option: "Off"
