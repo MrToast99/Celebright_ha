@@ -7,7 +7,7 @@ All notable changes are documented here. The format follows
 ## [0.3.2] - pending
 
 ### Upgrading from 0.3.1
-Update in HACS and restart. Nothing needs re-creating: existing holiday automations keep working, and the new inputs use their defaults until you set them (edit the automation to use them).
+Update in HACS and restart. Nothing needs re-creating: existing holiday automations keep working, and the new inputs use their defaults until you set them. To use them, re-import the blueprint (**Blueprints → ⋮ → Re-import blueprint**) and edit your existing automation; don't create a new one.
 
 ### Added
 - **Holiday controller:** built-in **Halloween** (Oct 25–31), four **custom holidays** (a scene plus any start and end date, may cross New Year), and optional **timing adjustments** (up to 14 extra days before or after each week-long holiday, and Halloween's first and last day).
@@ -16,7 +16,7 @@ Update in HACS and restart. Nothing needs re-creating: existing holiday automati
 ## [0.3.1] - 2026-10-26
 
 ### Upgrading from 0.3.0
-Update in HACS and restart. Automations made from the Celebright blueprints need re-creating: their inputs changed (see below). Import the blueprints again, create the automation, and delete the old one. Nothing else changes; the new scene entities appear on their own.
+Update in HACS and restart. Automations made from the Celebright blueprints need their inputs updated (see below): re-import each blueprint (**Settings → Automations & Scenes → Blueprints → ⋮ → Re-import blueprint**), then open your existing automation, pick the scenes from the new dropdowns and save. Don't use *Create automation* again, or you'll have two. Nothing else changes; the new scene entities appear on their own.
 
 ### Added
 - **Scene entities:** every saved scene gets a `scene.*` entity (activate it from automations, scripts, dashboards or voice). They follow the scenes in your account: new ones appear and deleted ones go on the next refresh. They sit on a "<device> Scenes" sub-device, so the controller's page shows one *Connected device* link instead of a long list; they are named after the controller (e.g. `scene.house_candy_cane`).
