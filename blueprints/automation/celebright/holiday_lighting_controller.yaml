@@ -158,27 +158,36 @@ variables:
 
 triggers:
   - trigger: sun
+    alias: Sunset
     event: sunset
     id: dusk
   - trigger: sun
+    alias: Sunrise
     event: sunrise
     id: dawn
   - trigger: time
+    alias: Midnight
     at: "00:00:00"
   - trigger: time
+    alias: 00:15 (end of the New Year window)
     at: "00:15:00"
   - trigger: time_pattern
+    alias: Every 30 minutes
     minutes: "/30"
   - trigger: template
+    alias: Aurora rises above the threshold
     value_template: "{{ aurora_sensor != '' and states(aurora_sensor) | float(0) > aurora_threshold | float(0) }}"
   - trigger: template
+    alias: Aurora falls to the threshold or below
     value_template: "{{ aurora_sensor != '' and states(aurora_sensor) | float(0) <= aurora_threshold | float(0) }}"
 
 actions:
-  - choose:
+  - alias: Apply the highest-priority matching scene
+    choose:
       # Daytime / sunrise: hand back to the controller's schedule. The dusk trigger is
       # excluded: right at sunset sun.sun can still read "above_horizon".
-      - conditions:
+      - alias: Daytime or sunrise - resume the schedule
+        conditions:
           - condition: or
             conditions:
               - condition: trigger
@@ -200,63 +209,72 @@ actions:
               option: "{{ off_option }}"
 
       # Night: the first matching rule wins (highest priority first).
-      - conditions: "{{ new_year_scene != '' and new_year_window }}"
+      - alias: New Year fireworks
+        conditions: "{{ new_year_scene != '' and new_year_window }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
               option: "{{ new_year_scene }}"
-      - conditions: "{{ aurora_scene != '' and aurora_active }}"
+      - alias: Aurora alert
+        conditions: "{{ aurora_scene != '' and aurora_active }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
               option: "{{ aurora_scene }}"
-      - conditions: "{{ december_scene != '' and now().month == 12 }}"
+      - alias: December
+        conditions: "{{ december_scene != '' and now().month == 12 }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
               option: "{{ december_scene }}"
-      - conditions: "{{ st_patricks_scene != '' and in_st_patricks }}"
+      - alias: St. Patrick's Day week
+        conditions: "{{ st_patricks_scene != '' and in_st_patricks }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
               option: "{{ st_patricks_scene }}"
-      - conditions: "{{ canada_day_scene != '' and in_canada_day }}"
+      - alias: Canada Day week
+        conditions: "{{ canada_day_scene != '' and in_canada_day }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
               option: "{{ canada_day_scene }}"
-      - conditions: "{{ thanksgiving_scene != '' and in_thanksgiving }}"
+      - alias: Canadian Thanksgiving week
+        conditions: "{{ thanksgiving_scene != '' and in_thanksgiving }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
               option: "{{ thanksgiving_scene }}"
-      - conditions: "{{ remembrance_scene != '' and in_remembrance }}"
+      - alias: Remembrance Day week
+        conditions: "{{ remembrance_scene != '' and in_remembrance }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
               option: "{{ remembrance_scene }}"
-      - conditions: "{{ easter_scene != '' and in_easter }}"
+      - alias: Easter Monday week
+        conditions: "{{ easter_scene != '' and in_easter }}"
         sequence:
           - action: select.select_option
             target:
               entity_id: !input scene_select
             data:
               option: "{{ easter_scene }}"
-      - conditions: "{{ truth_reconciliation_scene != '' and in_truth_reconciliation }}"
+      - alias: Truth and Reconciliation week
+        conditions: "{{ truth_reconciliation_scene != '' and in_truth_reconciliation }}"
         sequence:
           - action: select.select_option
             target:
