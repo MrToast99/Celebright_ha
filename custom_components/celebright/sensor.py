@@ -25,6 +25,30 @@ def _current_display(coord, device_id):
     return state.current_display if state else None
 
 
+def _active_source(coord, device_id):
+    state = coord.data.get(device_id)
+    return state.active_source if state else None
+
+
+def _active_event(coord, device_id):
+    """Name of the scheduled event playing now ("None" when the status says none)."""
+    state = coord.data.get(device_id)
+    if not state or state.active_source is None:
+        return None  # no AppSync/v3 status for this device
+    if not state.active_event_uuid:
+        return "None"
+    info = coord.device_infos.get(device_id)
+    for ev in (info.events if info else []):
+        if ev.uuid == state.active_event_uuid:
+            return ev.name
+    return state.active_event_uuid
+
+
+def _next_event_start(coord, device_id):
+    state = coord.data.get(device_id)
+    return state.next_event_start if state else None
+
+
 def _firmware(coord, device_id):
     info = coord.device_infos.get(device_id)
     return str(info.firmware) if info and info.firmware else None
@@ -87,6 +111,25 @@ SENSOR_DESCRIPTIONS: tuple[CelebrightSensorDescription, ...] = (
         name="Current Display",
         icon="mdi:television-play",
         value_fn=_current_display,
+    ),
+    CelebrightSensorDescription(
+        key="active_event",
+        name="Active Event",
+        icon="mdi:calendar-star",
+        value_fn=_active_event,
+    ),
+    CelebrightSensorDescription(
+        key="next_event_start",
+        name="Next Event Start",
+        icon="mdi:calendar-arrow-right",
+        value_fn=_next_event_start,
+    ),
+    CelebrightSensorDescription(
+        key="active_source",
+        name="Active Source",
+        icon="mdi:source-branch",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_active_source,
     ),
     # ── Static device info ───────────────────────────────────────────
     CelebrightSensorDescription(
@@ -189,9 +232,7 @@ class CelebrightSensor(CelebrightEntity, SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
 
-    # With _attr_has_entity_name = True and device_info set on the base class,
-    # returning the plain sensor name here causes HA to display "{device} {name}",
-    # e.g. "House Firmware". No need to include the device name manually.
+    # has_entity_name=True: HA prefixes the device name, so return only the sensor name.
     @property
     def name(self) -> str:
         return self.entity_description.name
@@ -219,6 +260,7 @@ class CelebrightSensor(CelebrightEntity, SensorEntity):
                     "when": ev.when_text,
                     "time": ev.time_text,
                     "priority": ev.priority,
+                    "enabled": ev.enabled,
                 }
                 for ev in info.events
             ]
@@ -228,9 +270,7 @@ class CelebrightSensor(CelebrightEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        # Static sensors (firmware, model, LED count) come from device_infos which
-        # are fetched once at setup and never cleared — keep them available even if
-        # the device goes temporarily offline.
+        # Static sensors stay available while the device is offline.
         if self.entity_description.is_static:
             return self._device_id in self.coordinator.device_infos
         return super().available

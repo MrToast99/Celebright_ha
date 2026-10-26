@@ -18,22 +18,26 @@ EP_GET_USER_DATA = "/getUserData"
 EP_GET_DEVICE_STATUSES = "/getUserDeviceStatuses"
 EP_GET_DEVICE_ZONES = "/getDeviceZones"
 EP_GET_DEVICE_SCENES = "/getDeviceScenes"
+EP_GET_DEVICE_EVENTS = "/getDeviceEvents"  # v3 event format
+
+# AWS AppSync GraphQL — live device status (from HAR capture)
+APPSYNC_URL = "https://4n5p3mnjnbdrdcuwf3v5o5r7jq.appsync-api.ca-central-1.amazonaws.com/graphql"
 
 # AWS IoT MQTT (from HAR capture)
 IOT_ENDPOINT = "a153dwfz99hvwi-ats.iot.ca-central-1.amazonaws.com"
 
-# MQTT topic structure: devices/{device_id}/v2/{direction}/{command}
-# Subscribe: devices/{id}/v2/server/#  and  devices/{id}/v2/device/#
-# Publish:   devices/{id}/v2/app/{command}
+# MQTT topics: devices/{id}/{protocol}/{app|device|server}/{command}
+# Firmware 3.x speaks "v3", older "v2"; a command on the wrong version is silently
+# ignored, so the protocol is probed per device (newest first).
+MQTT_PROTOCOLS = ("v3", "v2")
+MQTT_DEFAULT_PROTOCOL = "v3"
 MQTT_CMD_SET_COLOR = "setColor"               # payload: {"color": "RRGGBB"}
 MQTT_CMD_LOAD_SCENE = "loadSavedScene"        # payload: {"savedSceneUuid": "<uuid>"}
 MQTT_CMD_RESUME_SCHEDULE = "setResumeSchedule"  # payload: {}
 MQTT_CMD_GET_STATE = "getSystemState"         # payload: {"UTCTimeFromApp": epoch_int}
 MQTT_STATE_SUBTOPIC = "systemState"           # inbound: devices/{id}/v2/device/systemState
-MQTT_ACTIVE_SCENE_FIELD = "activeSavedScene"  # UUID in systemState when a scene is active — confirmed via HAR
-# NOT confirmed against a live systemState capture — inferred from the setColor
-# command using the same field name ("color") for its payload. If a real
-# capture shows different keys, update these two.
+MQTT_ACTIVE_SCENE_FIELD = "activeSavedScene"  # v2 systemState: active scene UUID
+# v2 colour/brightness keys: guessed from setColor's field name, never verified.
 MQTT_STATE_COLOR_FIELD = "color"              # RRGGBB hex string, if present
 MQTT_STATE_BRIGHTNESS_FIELD = "brightness"    # 0-255, if the device reports it separately
 

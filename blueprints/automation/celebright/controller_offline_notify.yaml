@@ -1,0 +1,54 @@
+blueprint:
+  name: Celebright controller offline notification
+  description: >
+    Runs an action (a persistent notification by default) when the controller has been
+    unavailable for a while.
+  domain: automation
+  author: MrToast99
+  source_url: https://github.com/MrToast99/Celebright_ha/blob/main/blueprints/automation/celebright/controller_offline_notify.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    light:
+      name: Controller light
+      description: Your controller's light entity.
+      selector:
+        entity:
+          filter:
+            - domain: light
+              integration: celebright
+    minutes:
+      name: Minutes unavailable
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: min
+          mode: box
+    notify:
+      name: Notification action
+      description: What to run. The variables light_name and minutes are available.
+      default:
+        - action: persistent_notification.create
+          data:
+            title: Celebright offline
+            message: "{{ light_name }} has been unreachable for {{ minutes }} minutes."
+      selector:
+        action:
+
+mode: single
+
+variables:
+  light: !input light
+  minutes: !input minutes
+  light_name: "{{ state_attr(light, 'friendly_name') or light }}"
+
+triggers:
+  - trigger: state
+    entity_id: !input light
+    to: unavailable
+    for:
+      minutes: !input minutes
+
+actions: !input notify

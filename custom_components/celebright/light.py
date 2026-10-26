@@ -1,10 +1,6 @@
-"""Celebright light platform.
+"""Light platform: one entity per controller (on/off, RGB colour, brightness).
 
-Each CLC controller is one HA light entity. Supports:
-  - On/off
-  - RGB color (maps to MQTT setColor with hex)
-  - Brightness (sent as scaled hex channels: brightness * color / 255)
-  - Defaults to warm white (FFFFFF) when turned on without a color argument
+Turning on with no colour uses white, or the last colour and brightness.
 """
 from __future__ import annotations
 
@@ -31,13 +27,12 @@ _LOGGER = logging.getLogger(__name__)
 _DEFAULT_COLOR = "FFFFFF"
 
 
-def _rgb_brightness_to_hex(rgb: tuple[int, int, int], brightness: int) -> str:
-    """Scale RGB by brightness and return 6-char hex."""
-    scale = brightness / 255.0
-    r = round(rgb[0] * scale)
-    g = round(rgb[1] * scale)
-    b = round(rgb[2] * scale)
-    return f"{r:02X}{g:02X}{b:02X}"
+def _normalize(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Scale so the brightest channel is 255 (HA's rgb_color excludes brightness)."""
+    peak = max(rgb)
+    if not peak:
+        return rgb
+    return (round(rgb[0] * 255 / peak), round(rgb[1] * 255 / peak), round(rgb[2] * 255 / peak))
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -70,12 +65,11 @@ class CelebrightLight(CelebrightEntity, LightEntity):
 
     def __init__(self, coordinator: CelebrightCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
-        # Optimistic cache — updated on each turn_on, cleared on turn_off
+        # Last colour (always full brightness) and brightness sent, to restore either one.
         self._last_hex: str = _DEFAULT_COLOR
+        self._last_brightness: int | None = None
 
-    # ------------------------------------------------------------------
-    # State
-    # ------------------------------------------------------------------
+    # --- State ---
 
     @property
     def is_on(self) -> bool:
@@ -94,7 +88,8 @@ class CelebrightLight(CelebrightEntity, LightEntity):
         state = self._device_state
         if state and state.color_hex:
             try:
-                return _hex_to_rgb(state.color_hex)
+                # HA reports brightness separately: strip any brightness baked into the colour.
+                return _normalize(_hex_to_rgb(state.color_hex))
             except (ValueError, IndexError):
                 pass
         return None
@@ -106,50 +101,58 @@ class CelebrightLight(CelebrightEntity, LightEntity):
             return {}
         return {
             "current_display": state.current_display,
+            "active_source": state.active_source,
             "schedule_enabled": state.schedule_enabled,
             "model": state.model_name,
             "num_leds": state.num_leds,
         }
 
-    # ------------------------------------------------------------------
-    # Commands
-    # ------------------------------------------------------------------
+    # --- Commands ---
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         rgb: tuple[int, int, int] | None = kwargs.get(ATTR_RGB_COLOR)
         brightness: int | None = kwargs.get(ATTR_BRIGHTNESS)
+        client = self.coordinator.client
 
-        if rgb and brightness is not None:
-            hex_color = _rgb_brightness_to_hex(rgb, brightness)
-        elif rgb:
-            hex_color = f"{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
-        elif brightness is not None:
-            # Re-apply brightness to last known color
-            try:
-                base_rgb = _hex_to_rgb(self._last_hex)
-                hex_color = _rgb_brightness_to_hex(base_rgb, brightness)
-            except (ValueError, IndexError):
-                hex_color = f"{brightness:02X}{brightness:02X}{brightness:02X}"
+        # The colour to use, always at full brightness.
+        if rgb:
+            base = _normalize(rgb)
         else:
-            hex_color = self._last_hex
+            try:
+                base = self.rgb_color or _normalize(_hex_to_rgb(self._last_hex))
+            except (ValueError, IndexError):
+                base = _normalize(_hex_to_rgb(_DEFAULT_COLOR))
+        base_hex = f"{base[0]:02X}{base[1]:02X}{base[2]:02X}"
 
         try:
-            await self.coordinator.client.async_set_color(self._device_id, hex_color)
-            self._last_hex = hex_color
-            # setColor clears any active saved scene
-            self.coordinator.set_active_scene(self._device_id, None)
+            if rgb is None and brightness is not None and self.is_on:
+                # Dim / brighten whatever is showing (a scene stays a scene).
+                level = brightness
+                await client.async_set_brightness(self._device_id, level, base_hex)
+            else:
+                level = brightness
+                if level is None:
+                    # A colour change keeps the current brightness; turn-on restores the last.
+                    level = self.brightness if (rgb and self.is_on) else self._last_brightness
+                await client.async_set_color(self._device_id, base_hex, level)
+                # A solid colour replaces any active saved scene.
+                self.coordinator.set_active_scene(self._device_id, None)
         except (CelebrightCommandError, CelebrightConnectionError) as err:
             _LOGGER.error("Celebright turn_on failed for %s: %s", self._device_id, err)
             return
 
-        await self.coordinator.async_request_refresh()
+        self._last_hex = base_hex
+        if level is not None:
+            self._last_brightness = level
+        self.coordinator.async_refresh_after_command()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        # Lights off. (Select "Off" is the separate "resume the schedule" action.)
         try:
-            await self.coordinator.client.async_resume_schedule(self._device_id)
+            await self.coordinator.client.async_turn_off(self._device_id)
             self.coordinator.set_active_scene(self._device_id, None)
         except (CelebrightCommandError, CelebrightConnectionError) as err:
             _LOGGER.error("Celebright turn_off failed for %s: %s", self._device_id, err)
             return
 
-        await self.coordinator.async_request_refresh()
+        self.coordinator.async_refresh_after_command()

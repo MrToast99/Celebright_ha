@@ -16,6 +16,7 @@ class EventInfo:
     when_text: str           # human-readable recurrence, e.g. "Every December 31"
     time_text: str           # human-readable window, e.g. "Sunset – Sunrise"
     raw: dict[str, Any] | None = None
+    enabled: bool = True     # v3 events can be switched off individually
 
 
 @dataclass
@@ -48,17 +49,25 @@ class SceneInfo:
 
 @dataclass
 class DeviceState:
-    """Combined state: REST status + optional MQTT systemState."""
+    """Device state merged from REST, AppSync and MQTT."""
     device_id: str
     available: bool          # Status == "Online"
     is_on: bool              # userDisplay != 0
     current_display: str     # scene name or "Off"
-    schedule_enabled: bool
+    schedule_enabled: bool | None  # None = the API didn't report it (newer v3 payloads)
 
-    # Populated from MQTT systemState when available
+    # From MQTT systemState:
     color_hex: str | None = None          # "RRGGBB" hex string
     brightness: int | None = None         # 0–255
     active_scene_uuid: str | None = None  # UUID if a saved scene is active
+
+    # From AppSync (active_source also from v3 MQTT):
+    active_source: str | None = None      # "off", "user_display", ...
+    active_event_uuid: str | None = None  # scheduled event currently playing
+    next_event_start: str | None = None   # device-local ISO time of the next event
+    sleep_timer: Any = None
+    # True when the source reports the scene explicitly, so None means "no scene"
+    scene_known: bool = False
 
     # Merged from DeviceInfo for convenience
     name: str = ""
@@ -67,6 +76,11 @@ class DeviceState:
     is_rgbw: bool = False
 
     raw: dict[str, Any] | None = None
+
+
+def uses_v3_firmware(info: "DeviceInfo | None") -> bool:
+    """Firmware 3.x controllers speak the v3 protocol (the app's own rule)."""
+    return bool(info and info.firmware is not None and info.firmware >= 3)
 
 
 class CelebrightAPIBase(ABC):
@@ -92,8 +106,26 @@ class CelebrightAPIBase(ABC):
         """Return the saved scene list for a device."""
 
     @abstractmethod
-    async def async_set_color(self, device_id: str, hex_color: str) -> None:
-        """Turn device on with a solid hex color (e.g. 'FF0000')."""
+    async def async_set_color(
+        self, device_id: str, hex_color: str, brightness: int | None = None
+    ) -> None:
+        """Turn device on with a solid full-brightness hex colour (e.g. 'FF0000'),
+        optionally at a 0-255 brightness."""
+
+    @abstractmethod
+    async def async_set_brightness(
+        self, device_id: str, brightness: int, base_hex: str
+    ) -> None:
+        """Change brightness only (base_hex is the full-brightness colour, for
+        protocols that can only resend a colour)."""
+
+    @abstractmethod
+    async def async_turn_off(self, device_id: str) -> None:
+        """Turn the lights off."""
+
+    @abstractmethod
+    async def async_set_schedule_enabled(self, device_id: str, enabled: bool) -> None:
+        """Enable or disable the on-device schedule."""
 
     @abstractmethod
     async def async_load_scene(self, device_id: str, scene_uuid: str) -> None:
@@ -101,7 +133,7 @@ class CelebrightAPIBase(ABC):
 
     @abstractmethod
     async def async_resume_schedule(self, device_id: str) -> None:
-        """Return device to its scheduled display (turn off manual override)."""
+        """Hand control back to the schedule (clear any manual override)."""
 
 
 class CelebrightError(Exception):
@@ -114,6 +146,10 @@ class CelebrightConnectionError(CelebrightError):
 
 class CelebrightAuthError(CelebrightError):
     """Authentication failed."""
+
+
+class CelebrightLoginError(CelebrightAuthError):
+    """The account itself was rejected (wrong or changed password); re-entering it can fix this."""
 
 
 class CelebrightCommandError(CelebrightError):

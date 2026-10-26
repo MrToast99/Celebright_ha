@@ -1,0 +1,272 @@
+blueprint:
+  name: Celebright holiday lighting controller
+  description: >
+    One automation for all scheduled lighting. Every trigger re-evaluates the date and
+    time and applies the highest-priority matching scene: New Year fireworks, an aurora
+    alert, December, then the week-long holidays. Otherwise, and in daylight, the
+    controller's own schedule takes over. Leave a scene blank to skip that holiday.
+  domain: automation
+  author: MrToast99
+  source_url: https://github.com/MrToast99/Celebright_ha/blob/main/blueprints/automation/celebright/holiday_lighting_controller.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    controller:
+      name: Controller
+      icon: mdi:string-lights
+      input:
+        scene_select:
+          name: Scene selector
+          description: Your controller's scene dropdown.
+          selector:
+            entity:
+              filter:
+                - domain: select
+                  integration: celebright
+        off_option:
+          name: Resume-schedule option
+          description: The dropdown option that hands control back to the schedule.
+          default: "Off"
+          selector:
+            text:
+    aurora:
+      name: Aurora alert
+      icon: mdi:weather-night
+      collapsed: true
+      input:
+        aurora_sensor:
+          name: Aurora visibility sensor
+          description: Optional. Leave empty to ignore aurora.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        aurora_threshold:
+          name: Aurora threshold
+          description: Show the aurora scene above this value.
+          default: 75
+          selector:
+            number:
+              min: 0
+              max: 100
+              mode: box
+        aurora_scene:
+          name: Aurora scene
+          description: Scene name exactly as in the dropdown.
+          default: ""
+          selector:
+            text:
+    holidays:
+      name: Holiday scenes
+      icon: mdi:calendar-star
+      description: Scene names exactly as in the dropdown. Leave blank to skip a holiday.
+      input:
+        new_year_scene:
+          name: New Year fireworks (Jan 1, 00:00–00:15)
+          default: ""
+          selector:
+            text:
+        december_scene:
+          name: December (whole month)
+          default: ""
+          selector:
+            text:
+        st_patricks_scene:
+          name: St. Patrick's Day week (Mar 17)
+          default: ""
+          selector:
+            text:
+        canada_day_scene:
+          name: Canada Day week (Jul 1)
+          default: ""
+          selector:
+            text:
+        thanksgiving_scene:
+          name: Canadian Thanksgiving week (2nd Monday of October)
+          default: ""
+          selector:
+            text:
+        remembrance_scene:
+          name: Remembrance Day week (Nov 11)
+          default: ""
+          selector:
+            text:
+        easter_scene:
+          name: Easter Monday week
+          default: ""
+          selector:
+            text:
+        truth_reconciliation_scene:
+          name: National Day for Truth and Reconciliation week (Sep 30)
+          default: ""
+          selector:
+            text:
+
+mode: restart
+
+trigger_variables:
+  aurora_sensor: !input aurora_sensor
+  aurora_threshold: !input aurora_threshold
+
+variables:
+  scene_select: !input scene_select
+  off_option: !input off_option
+  aurora_sensor: !input aurora_sensor
+  aurora_threshold: !input aurora_threshold
+  aurora_scene: !input aurora_scene
+  new_year_scene: !input new_year_scene
+  december_scene: !input december_scene
+  st_patricks_scene: !input st_patricks_scene
+  canada_day_scene: !input canada_day_scene
+  thanksgiving_scene: !input thanksgiving_scene
+  remembrance_scene: !input remembrance_scene
+  easter_scene: !input easter_scene
+  truth_reconciliation_scene: !input truth_reconciliation_scene
+  # A week-long holiday applies on every day of the Mon-Sun week containing its date.
+  in_st_patricks: "{{ now().isocalendar()[1] == now().replace(month=3, day=17).isocalendar()[1] }}"
+  in_canada_day: "{{ now().isocalendar()[1] == now().replace(month=7, day=1).isocalendar()[1] }}"
+  in_remembrance: "{{ now().isocalendar()[1] == now().replace(month=11, day=11).isocalendar()[1] }}"
+  in_truth_reconciliation: "{{ now().isocalendar()[1] == now().replace(month=9, day=30).isocalendar()[1] }}"
+  # Canadian Thanksgiving: 2nd Monday of October.
+  in_thanksgiving: >-
+    {%- set oct1 = now().replace(month=10, day=1) -%}
+    {%- set first_mon = 1 + (7 - oct1.weekday()) % 7 -%}
+    {%- set thanks = now().replace(month=10, day=first_mon + 7) -%}
+    {{ now().isocalendar()[1] == thanks.isocalendar()[1] }}
+  # Easter Monday (Gregorian computus, +1 day).
+  in_easter: >-
+    {%- set y = now().year -%}
+    {%- set a = y % 19 -%}
+    {%- set b = y // 100 -%}
+    {%- set c = y % 100 -%}
+    {%- set d = b // 4 -%}
+    {%- set e = b % 4 -%}
+    {%- set f = (b + 8) // 25 -%}
+    {%- set g = (b - f + 1) // 3 -%}
+    {%- set h = (19*a + b - d - g + 15) % 30 -%}
+    {%- set i = c // 4 -%}
+    {%- set k = c % 4 -%}
+    {%- set l = (32 + 2*e + 2*i - h - k) % 7 -%}
+    {%- set m = (a + 11*h + 22*l) // 451 -%}
+    {%- set mon = (h + l - 7*m + 114) // 31 -%}
+    {%- set day = ((h + l - 7*m + 114) % 31) + 1 -%}
+    {%- set emonday = now().replace(month=mon, day=day, hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1) -%}
+    {{ now().isocalendar()[1] == emonday.isocalendar()[1] }}
+  aurora_active: "{{ aurora_sensor != '' and states(aurora_sensor) | float(0) > aurora_threshold | float(0) }}"
+  new_year_window: "{{ now().month == 1 and now().day == 1 and now().hour == 0 and now().minute < 15 }}"
+
+triggers:
+  - trigger: sun
+    event: sunset
+    id: dusk
+  - trigger: sun
+    event: sunrise
+    id: dawn
+  - trigger: time
+    at: "00:00:00"
+  - trigger: time
+    at: "00:15:00"
+  - trigger: time_pattern
+    minutes: "/30"
+  - trigger: template
+    value_template: "{{ aurora_sensor != '' and states(aurora_sensor) | float(0) > aurora_threshold | float(0) }}"
+  - trigger: template
+    value_template: "{{ aurora_sensor != '' and states(aurora_sensor) | float(0) <= aurora_threshold | float(0) }}"
+
+actions:
+  - choose:
+      # Daytime / sunrise: hand back to the controller's schedule. The dusk trigger is
+      # excluded: right at sunset sun.sun can still read "above_horizon".
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: dawn
+              - condition: and
+                conditions:
+                  - condition: not
+                    conditions:
+                      - condition: trigger
+                        id: dusk
+                  - condition: state
+                    entity_id: sun.sun
+                    state: above_horizon
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ off_option }}"
+
+      # Night: the first matching rule wins (highest priority first).
+      - conditions: "{{ new_year_scene != '' and new_year_window }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ new_year_scene }}"
+      - conditions: "{{ aurora_scene != '' and aurora_active }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ aurora_scene }}"
+      - conditions: "{{ december_scene != '' and now().month == 12 }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ december_scene }}"
+      - conditions: "{{ st_patricks_scene != '' and in_st_patricks }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ st_patricks_scene }}"
+      - conditions: "{{ canada_day_scene != '' and in_canada_day }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ canada_day_scene }}"
+      - conditions: "{{ thanksgiving_scene != '' and in_thanksgiving }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ thanksgiving_scene }}"
+      - conditions: "{{ remembrance_scene != '' and in_remembrance }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ remembrance_scene }}"
+      - conditions: "{{ easter_scene != '' and in_easter }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ easter_scene }}"
+      - conditions: "{{ truth_reconciliation_scene != '' and in_truth_reconciliation }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ truth_reconciliation_scene }}"
+    # Night with no holiday active: hand back to the schedule.
+    default:
+      - action: select.select_option
+        target:
+          entity_id: !input scene_select
+        data:
+          option: "{{ off_option }}"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -10,19 +11,25 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
+from .api import CelebrightError
+from .api.events_v3 import build_rrule, code_to_anchor
 from .const import DOMAIN
 from .coordinator import CelebrightCoordinator
+from .dashboard import build_dashboard
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_CREATE_EVENT = "create_event"
 SERVICE_UPDATE_EVENT = "update_event"
 SERVICE_DELETE_EVENT = "delete_event"
+SERVICE_SET_EVENT_ENABLED = "set_event_enabled"
 SERVICE_REFRESH_SCENES = "refresh_scenes"
+SERVICE_GENERATE_DASHBOARD = "generate_dashboard"
 
-# Recurrence frequency: 1 = one-time / seasonal range, 4 = yearly (matches the app)
+# Weekday codes accepted for by_day.
 _WEEKDAYS = {"MO", "TU", "WE", "TH", "FR", "SA", "SU"}
 
 # Shared field block for create / update
@@ -35,16 +42,20 @@ _EVENT_FIELDS = {
     vol.Required("start_time"): cv.string,  # sunset|sunrise|midnight|HH:MM
     vol.Required("end_time"): cv.string,
     vol.Optional("priority", default=3): vol.All(vol.Coerce(int), vol.Range(min=1, max=4)),
-    # The GUI "frequency" field is a select selector, which always submits its
-    # option value as a string ("1"/"4") — vol.Coerce lets that and a bare int
-    # (from YAML) both validate.
-    vol.Optional("frequency", default=1): vol.All(vol.Coerce(int), vol.In([1, 4])),
+    # The GUI select submits "0"/"1"/"4" as strings; Coerce accepts those and YAML ints.
+    # 0 = once (v3 only), 1 = daily (until repeat_until, or forever), 4 = yearly.
+    # No default: omitted = once (or daily until repeat_until) on v3, daily on older firmware.
+    vol.Optional("frequency"): vol.All(vol.Coerce(int), vol.In([0, 1, 4])),
     vol.Optional("interval", default=1): cv.positive_int,
     vol.Optional("repeat_until"): cv.string,
     vol.Optional("by_day"): cv.string,
     vol.Optional("by_month"): vol.All(vol.Coerce(int), vol.Range(min=1, max=12)),
     vol.Optional("by_month_day"): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
     vol.Optional("by_set_pos"): vol.All(vol.Coerce(int), vol.Range(min=-1, max=5)),
+    # v3 controllers only (ignored on older firmware):
+    vol.Optional("start_offset_minutes"): vol.All(vol.Coerce(int), vol.Range(min=-720, max=720)),
+    vol.Optional("end_offset_minutes"): vol.All(vol.Coerce(int), vol.Range(min=-720, max=720)),
+    vol.Optional("enabled"): cv.boolean,
 }
 
 CREATE_EVENT_SCHEMA = vol.Schema(_EVENT_FIELDS)
@@ -55,6 +66,24 @@ UPDATE_EVENT_SCHEMA = vol.Schema(
         **_EVENT_FIELDS,
         vol.Exclusive("event_uuid", "event_id"): cv.string,
         vol.Exclusive("event_name", "event_id"): cv.string,
+    }
+)
+
+GENERATE_DASHBOARD_SCHEMA = vol.Schema(
+    {
+        vol.Optional("device_id"): cv.string,
+        vol.Optional("filename", default="celebright_dashboard.yaml"): vol.All(
+            cv.string, vol.Match(r"^[A-Za-z0-9_.-]+\.ya?ml$")
+        ),
+    }
+)
+
+SET_EVENT_ENABLED_SCHEMA = vol.Schema(
+    {
+        vol.Optional("device_id"): cv.string,
+        vol.Exclusive("event_uuid", "event_id"): cv.string,
+        vol.Exclusive("event_name", "event_id"): cv.string,
+        vol.Required("enabled"): cv.boolean,
     }
 )
 
@@ -143,22 +172,64 @@ def _build_event_kwargs(hass: HomeAssistant, coord, device_id: str, data: dict) 
     if by_day and by_day.upper() not in _WEEKDAYS:
         raise HomeAssistantError(f"by_day must be one of {sorted(_WEEKDAYS)}")
     repeat_until = data.get("repeat_until")
+    scene_uuid = _resolve_scene_uuid(coord, device_id, data["scene"])
+    start_date = _parse_date(hass, data["start_date"])
+    end_date = _parse_date(hass, data["end_date"])
+    start_time = _parse_time(data["start_time"])
+    end_time = _parse_time(data["end_time"])
+    until = _parse_date(hass, repeat_until) if repeat_until else None
+    by_day = by_day.upper() if by_day else None
+    freq = data.get("frequency")
+    legacy_freq = 1 if freq is None else freq
+    v3_freq = (0 if until is None else 1) if freq is None else freq
+
+    start_anchor, start_clock = code_to_anchor(start_time)
+    end_anchor, end_clock = code_to_anchor(end_time)
     return {
         "name": data["name"],
-        "scene_uuid": _resolve_scene_uuid(coord, device_id, data["scene"]),
-        "start_date": _parse_date(hass, data["start_date"]),
-        "end_date": _parse_date(hass, data["end_date"]),
-        "start_time": _parse_time(data["start_time"]),
-        "end_time": _parse_time(data["end_time"]),
+        "scene_uuid": scene_uuid,
+        "start_date": start_date,
+        "end_date": end_date,
+        "start_time": start_time,
+        "end_time": end_time,
         "priority": data["priority"],
-        "frequency": data["frequency"],
+        "frequency": legacy_freq,
         "interval": data["interval"],
-        "repeat_until": _parse_date(hass, repeat_until) if repeat_until else None,
-        "by_day": by_day.upper() if by_day else None,
+        "repeat_until": until,
+        "by_day": by_day,
         "by_month": data.get("by_month"),
         "by_month_day": data.get("by_month_day"),
         "by_set_pos": data.get("by_set_pos"),
+        # The same event in v3 format: local date strings, sunrise/sunset anchors, RRULE.
+        "v3_event": {
+            "name": data["name"],
+            "scene_uuid": scene_uuid,
+            "start_date": _epoch_to_local_date(start_date),
+            "end_date": _epoch_to_local_date(end_date),
+            "start_anchor": start_anchor,
+            "start_time": start_clock,
+            "end_anchor": end_anchor,
+            "end_time": end_clock,
+            "priority": data["priority"],
+            "start_offset_minutes": data.get("start_offset_minutes"),
+            "end_offset_minutes": data.get("end_offset_minutes"),
+            "rrule": build_rrule(
+                frequency=v3_freq,
+                interval=data["interval"],
+                by_day=by_day,
+                by_month=data.get("by_month"),
+                by_month_day=data.get("by_month_day"),
+                by_set_pos=data.get("by_set_pos"),
+                until_epoch=until,
+            ),
+            "enabled": data.get("enabled", True),
+        },
     }
+
+
+def _epoch_to_local_date(epoch: int) -> str:
+    """Epoch seconds -> 'YYYY-MM-DD' in the HA time zone."""
+    return dt_util.as_local(dt_util.utc_from_timestamp(epoch)).strftime("%Y-%m-%d")
 
 
 def _resolve_event_uuid(coord, device_id: str, data: dict) -> str:
@@ -178,6 +249,22 @@ def _resolve_event_uuid(coord, device_id: str, data: dict) -> str:
     raise HomeAssistantError("Provide either 'event_uuid' or 'event_name'")
 
 
+def _read_dashboard_template() -> str:
+    return Path(__file__).with_name("dashboard.yaml").read_text(encoding="utf-8")
+
+
+def _write_text(path: str, text: str) -> None:
+    Path(path).write_text(text, encoding="utf-8")
+
+
+async def _run(coro):
+    """Await a Celebright call, surfacing API errors as clean HA service errors."""
+    try:
+        return await coro
+    except CelebrightError as err:
+        raise HomeAssistantError(str(err)) from err
+
+
 def async_register_services(hass: HomeAssistant) -> None:
     """Register Celebright services once."""
     if hass.services.has_service(DOMAIN, SERVICE_CREATE_EVENT):
@@ -186,22 +273,49 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def _handle_create_event(call: ServiceCall) -> ServiceResponse:
         coord, device_id = _find_coordinator(hass, call.data.get("device_id"))
         kwargs = _build_event_kwargs(hass, coord, device_id, call.data)
-        ack = await coord.async_create_event(device_id, **kwargs)
+        ack = await _run(coord.async_create_event(device_id, **kwargs))
         return {"created": ack}
 
     async def _handle_update_event(call: ServiceCall) -> ServiceResponse:
         coord, device_id = _find_coordinator(hass, call.data.get("device_id"))
         event_uuid = _resolve_event_uuid(coord, device_id, call.data)
-        kwargs = _build_event_kwargs(hass, coord, device_id, call.data)
+        data = dict(call.data)
+        if "enabled" not in data:
+            # Don't silently re-enable an event that is switched off.
+            info = coord.device_infos.get(device_id)
+            existing = next((e for e in (info.events if info else []) if e.uuid == event_uuid), None)
+            data["enabled"] = existing.enabled if existing else True
+        kwargs = _build_event_kwargs(hass, coord, device_id, data)
         # Reusing the same uuid turns saveEvent into an in-place update.
-        ack = await coord.async_create_event(device_id, event_uuid=event_uuid, **kwargs)
+        ack = await _run(coord.async_create_event(device_id, event_uuid=event_uuid, **kwargs))
         return {"updated": ack}
 
     async def _handle_delete_event(call: ServiceCall) -> ServiceResponse:
         coord, device_id = _find_coordinator(hass, call.data.get("device_id"))
         event_uuid = _resolve_event_uuid(coord, device_id, call.data)
-        ack = await coord.async_delete_event(device_id, event_uuid)
+        ack = await _run(coord.async_delete_event(device_id, event_uuid))
         return {"deleted": ack}
+
+    async def _handle_set_event_enabled(call: ServiceCall) -> ServiceResponse:
+        coord, device_id = _find_coordinator(hass, call.data.get("device_id"))
+        event_uuid = _resolve_event_uuid(coord, device_id, call.data)
+        ack = await _run(coord.async_set_event_enabled(device_id, event_uuid, call.data["enabled"]))
+        return {"event": ack}
+
+    async def _handle_generate_dashboard(call: ServiceCall) -> ServiceResponse:
+        coord, device_id = _find_coordinator(hass, call.data.get("device_id"))
+        info = coord.device_infos.get(device_id)
+        registry = er.async_get(hass)
+        template = await hass.async_add_executor_job(_read_dashboard_template)
+        text, missing = build_dashboard(
+            template,
+            info.name if info else device_id,
+            device_id,
+            lambda domain, unique_id: registry.async_get_entity_id(domain, DOMAIN, unique_id),
+        )
+        path = hass.config.path(call.data["filename"])
+        await hass.async_add_executor_job(_write_text, path, text)
+        return {"file": path, "missing_entities": missing, "yaml": text}
 
     async def _handle_refresh_scenes(call: ServiceCall) -> None:
         # Refresh every loaded Celebright coordinator (no target needed).
@@ -225,7 +339,15 @@ def async_register_services(hass: HomeAssistant) -> None:
         schema=DELETE_EVENT_SCHEMA, supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
+        DOMAIN, SERVICE_SET_EVENT_ENABLED, _handle_set_event_enabled,
+        schema=SET_EVENT_ENABLED_SCHEMA, supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
         DOMAIN, SERVICE_REFRESH_SCENES, _handle_refresh_scenes,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_GENERATE_DASHBOARD, _handle_generate_dashboard,
+        schema=GENERATE_DASHBOARD_SCHEMA, supports_response=SupportsResponse.OPTIONAL,
     )
 
 
@@ -236,6 +358,8 @@ def async_unregister_services(hass: HomeAssistant) -> None:
             SERVICE_CREATE_EVENT,
             SERVICE_UPDATE_EVENT,
             SERVICE_DELETE_EVENT,
+            SERVICE_SET_EVENT_ENABLED,
             SERVICE_REFRESH_SCENES,
+            SERVICE_GENERATE_DASHBOARD,
         ):
             hass.services.async_remove(DOMAIN, svc)

@@ -65,13 +65,14 @@ create_event:
           mode: slider
     frequency:
       name: Frequency
-      description: 1 = one-time / seasonal range, 4 = yearly recurring.
+      description: 'Daily (until "Repeat until", or forever), Yearly, or Once (v3 only). Omitted: once, or daily until "Repeat until" if set.'
       required: false
-      default: 1
       selector:
         select:
           options:
-            - label: One-time / seasonal
+            - label: Once (newer controllers only)
+              value: "0"
+            - label: Daily
               value: "1"
             - label: Yearly
               value: "4"
@@ -126,6 +127,32 @@ create_event:
           min: -1
           max: 5
           mode: box
+    start_offset_minutes:
+      name: Start offset (minutes)
+      description: "v3 only: minutes to shift a sunset/sunrise start (negative = earlier)."
+      required: false
+      selector:
+        number:
+          min: -720
+          max: 720
+          unit_of_measurement: min
+          mode: box
+    end_offset_minutes:
+      name: End offset (minutes)
+      description: "v3 only: minutes to shift a sunset/sunrise end."
+      required: false
+      selector:
+        number:
+          min: -720
+          max: 720
+          unit_of_measurement: min
+          mode: box
+    enabled:
+      name: Enabled
+      description: "v3 only. Create defaults to on; update keeps the current state unless set."
+      required: false
+      selector:
+        boolean:
 
 update_event:
   name: Update schedule event
@@ -202,12 +229,14 @@ update_event:
           mode: slider
     frequency:
       name: Frequency
+      description: Once (newer controllers only), Daily, or Yearly. Omit for the default.
       required: false
-      default: 1
       selector:
         select:
           options:
-            - label: One-time / seasonal
+            - label: Once (newer controllers only)
+              value: "0"
+            - label: Daily
               value: "1"
             - label: Yearly
               value: "4"
@@ -256,6 +285,63 @@ update_event:
           min: -1
           max: 5
           mode: box
+    start_offset_minutes:
+      name: Start offset (minutes)
+      description: "v3 only: minutes to shift a sunset/sunrise start (negative = earlier)."
+      required: false
+      selector:
+        number:
+          min: -720
+          max: 720
+          unit_of_measurement: min
+          mode: box
+    end_offset_minutes:
+      name: End offset (minutes)
+      description: "v3 only: minutes to shift a sunset/sunrise end."
+      required: false
+      selector:
+        number:
+          min: -720
+          max: 720
+          unit_of_measurement: min
+          mode: box
+    enabled:
+      name: Enabled
+      description: "v3 only. Create defaults to on; update keeps the current state unless set."
+      required: false
+      selector:
+        boolean:
+
+set_event_enabled:
+  name: Enable or disable a schedule event
+  description: >
+    Switch one scheduled event on or off without deleting it. Newer (v3)
+    controllers only. Identify the event by event_uuid or event_name.
+  fields:
+    enabled:
+      name: Enabled
+      description: true to enable, false to disable.
+      required: true
+      selector:
+        boolean:
+    event_uuid:
+      name: Event UUID
+      description: UUID of the event (from the Scheduled Events sensor attributes).
+      required: false
+      selector:
+        text:
+    event_name:
+      name: Event name
+      description: Name of the event (alternative to event_uuid).
+      required: false
+      selector:
+        text:
+    device_id:
+      name: Device ID
+      description: Celebright device ID. Optional if you only have one device.
+      required: false
+      selector:
+        text:
 
 delete_event:
   name: Delete schedule event
@@ -282,10 +368,28 @@ delete_event:
       selector:
         text:
 
+generate_dashboard:
+  name: Generate dashboard
+  description: >
+    Write a Celebright dashboard that uses your controller's real entity IDs and name,
+    so there is nothing to edit. Re-run it after updating the integration.
+  fields:
+    filename:
+      name: File name
+      description: Written to your Home Assistant config folder.
+      required: false
+      default: celebright_dashboard.yaml
+      selector:
+        text:
+    device_id:
+      name: Device ID
+      description: Celebright device ID. Optional if you only have one device.
+      required: false
+      selector:
+        text:
+
 refresh_scenes:
   name: Refresh scenes
   description: >
-    Re-pull the saved scene list (and schedule) from your Celebright account for
-    all configured devices. Use after adding, renaming, or deleting scenes in the
-    Celebright app so Home Assistant picks them up without a reload. (Scenes also
-    auto-refresh every 30 minutes.)
+    Re-pull the saved scenes and schedule from your Celebright account. Use after
+    changing scenes in the Celebright app (they also refresh every 30 minutes).

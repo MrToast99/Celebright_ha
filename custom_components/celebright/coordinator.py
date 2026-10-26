@@ -1,15 +1,25 @@
 """DataUpdateCoordinator — polls Celebright device statuses and scene lists."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import CelebrightCloudAPI, CelebrightConnectionError, DeviceInfo, DeviceState, SceneInfo
+from .api import (
+    CelebrightAuthError,
+    CelebrightCloudAPI,
+    CelebrightConnectionError,
+    CelebrightLoginError,
+    DeviceInfo,
+    DeviceState,
+    SceneInfo,
+)
 from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN, SCAN_INTERVAL_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
@@ -19,7 +29,7 @@ SCENE_REFRESH_INTERVAL = 1800  # 30 minutes
 
 
 class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
-    """Polls device statuses; device info and scene lists are fetched once at setup."""
+    """Polls device statuses; device info and scenes refresh every 30 minutes or on demand."""
 
     def __init__(self, hass: HomeAssistant, entry_data: dict[str, Any]) -> None:
         super().__init__(
@@ -41,14 +51,11 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         # When scenes/device-info were last pulled (monotonic seconds)
         self._last_scene_refresh: float = 0.0
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
+    # --- Lifecycle ---
 
     async def async_setup(self) -> None:
         await self.client.async_connect()
-        # Copy device infos to a public attribute so all entities can read them
-        # without reaching into the client's private state.
+        # Public copy, so entities don't reach into the client's private state.
         self.device_infos = dict(self.client._device_infos)
         for device_id in self.device_infos:
             await self._fetch_scenes(device_id)
@@ -57,26 +64,28 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
     async def async_shutdown(self) -> None:
         await self.client.async_disconnect()
 
-    # ------------------------------------------------------------------
-    # Poll
-    # ------------------------------------------------------------------
+    # --- Poll ---
 
     async def _async_update_data(self) -> dict[str, DeviceState]:
         try:
             statuses = await self.client.async_get_device_statuses()
-        except CelebrightConnectionError as err:
+        except CelebrightLoginError as err:
+            # Cognito rejected the account: start re-authentication instead of failing every poll.
+            raise ConfigEntryAuthFailed(f"Celebright login failed: {err}") from err
+        except (CelebrightConnectionError, CelebrightAuthError) as err:
+            # Unreachable, or an API refusal with a good login: treat as transient.
             raise UpdateFailed(f"Celebright unreachable: {err}") from err
 
         for device_id, state in statuses.items():
             if not state.is_on:
                 self._active_scenes[device_id] = None
             elif state.active_scene_uuid is not None:
-                # Real MQTT-reported value — authoritative. Keep the optimistic
-                # cache in sync so a later poll that can't reach MQTT falls back
-                # to the last known-good real value instead of a stale
-                # HA-initiated selection that may no longer be what's showing
-                # (e.g. the device's own schedule took over in the meantime).
+                # The device-reported scene wins; mirror it into the optimistic cache so a poll
+                # that can't reach the device falls back to it, not to a stale HA selection.
                 self._active_scenes[device_id] = state.active_scene_uuid
+            elif state.scene_known:
+                # Status says "no saved scene" (e.g. a solid colour): drop any stale selection.
+                self._active_scenes[device_id] = None
             elif device_id in self._active_scenes:
                 state.active_scene_uuid = self._active_scenes[device_id]
 
@@ -86,9 +95,7 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
 
         return statuses
 
-    # ------------------------------------------------------------------
-    # Scene helpers
-    # ------------------------------------------------------------------
+    # --- Scene helpers ---
 
     async def _fetch_scenes(self, device_id: str) -> None:
         try:
@@ -115,9 +122,15 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
     def set_active_scene(self, device_id: str, scene_uuid: str | None) -> None:
         self._active_scenes[device_id] = scene_uuid
 
-    # ------------------------------------------------------------------
-    # Refresh (scenes + device info/schedule)
-    # ------------------------------------------------------------------
+    def async_refresh_after_command(self, delay: float = 1.5) -> None:
+        """Poll shortly after a command without blocking (the cloud status lags the controller)."""
+        async def _later() -> None:
+            await asyncio.sleep(delay)
+            await self.async_request_refresh()
+
+        self.hass.async_create_background_task(_later(), name=f"{DOMAIN} refresh after command")
+
+    # --- Refresh (scenes + device info/schedule) ---
 
     async def async_refresh_scenes(self) -> None:
         """Manually re-pull scene lists (and device info/schedule) from the account."""
@@ -138,9 +151,7 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         if notify:
             self.async_update_listeners()
 
-    # ------------------------------------------------------------------
-    # Schedule writes
-    # ------------------------------------------------------------------
+    # --- Schedule writes ---
 
     async def async_create_event(self, device_id: str, **kwargs: Any) -> dict[str, Any]:
         """Create (or, with event_uuid, update) a schedule event, then refresh."""
@@ -152,6 +163,14 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         """Delete a schedule event by UUID, then refresh cached device info."""
         ack = await self.client.async_delete_event(device_id, event_uuid)
         await self._refresh_device_infos("delete_event")
+        return ack
+
+    async def async_set_event_enabled(
+        self, device_id: str, event_uuid: str, enabled: bool
+    ) -> dict[str, Any]:
+        """Enable/disable one schedule event, then refresh the cached schedule."""
+        ack = await self.client.async_set_event_enabled(device_id, event_uuid, enabled)
+        await self._refresh_device_infos("set_event_enabled")
         return ack
 
     async def _refresh_device_infos(self, why: str) -> None:

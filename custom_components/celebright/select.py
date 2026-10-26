@@ -1,15 +1,6 @@
-"""Celebright scene selector platform.
+"""Scene selector: one saved-scene dropdown per controller.
 
-Exposes each device's saved scene list as a HA SelectEntity.
-Selecting a scene activates it via MQTT loadSavedScene.
-Selecting "Off" calls setResumeSchedule (returns to schedule).
-
-Usable in automations:
-  service: select.select_option
-  target:
-    entity_id: select.house_scene
-  data:
-    option: "<one of your saved scene names>"
+Picking a scene loads it; "Off" resumes the schedule.
 """
 from __future__ import annotations
 
@@ -53,8 +44,7 @@ class CelebrightSceneSelect(CelebrightEntity, SelectEntity):
 
     @property
     def name(self) -> str:
-        # With has_entity_name=True and device_info, HA prepends the device name
-        # automatically — return only the entity-specific part.
+        # has_entity_name=True: HA prepends the device name, so return only our part.
         return "Scene"
 
     @property
@@ -90,4 +80,4 @@ class CelebrightSceneSelect(CelebrightEntity, SelectEntity):
             )
             return
 
-        await self.coordinator.async_request_refresh()
+        self.coordinator.async_refresh_after_command()

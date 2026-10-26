@@ -17,12 +17,10 @@ class CelebrightEntity(CoordinatorEntity[CelebrightCoordinator]):
     def __init__(self, coordinator: CelebrightCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
-        # Default unique_id — subclasses override _attr_unique_id after super().__init__()
+        # Default unique_id; subclasses override it.
         self._attr_unique_id = device_id
 
-    # ------------------------------------------------------------------
-    # HA Device registration
-    # ------------------------------------------------------------------
+    # --- HA Device registration ---
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -48,9 +46,7 @@ class CelebrightEntity(CoordinatorEntity[CelebrightCoordinator]):
             hw_version=hw,
         )
 
-    # ------------------------------------------------------------------
-    # Common properties
-    # ------------------------------------------------------------------
+    # --- Common properties ---
 
     @property
     def _device_state(self) -> DeviceState | None:
@@ -58,8 +54,7 @@ class CelebrightEntity(CoordinatorEntity[CelebrightCoordinator]):
 
     @property
     def name(self) -> str | None:
-        # Primary entities (light) return None so HA uses the device name directly.
-        # Sub-entities (sensors, select) override this with their specific name.
+        # None = use the device name (the light); sub-entities return their own name.
         return None
 
     @property

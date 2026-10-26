@@ -5,10 +5,12 @@ from .base import (
     CelebrightCommandError,
     CelebrightConnectionError,
     CelebrightError,
+    CelebrightLoginError,
     DeviceInfo,
     DeviceState,
     EventInfo,
     SceneInfo,
+    uses_v3_firmware,
 )
 from .cloud import CelebrightCloudAPI
 from .mqtt import CelebrightMQTT, compute_event_md5, presign_mqtt_wss_url
@@ -22,6 +24,7 @@ __all__ = [
     "CelebrightCommandError",
     "CelebrightConnectionError",
     "CelebrightError",
+    "CelebrightLoginError",
     "CelebrightMQTT",
     "compute_event_md5",
     "CognitoTokens",
@@ -30,4 +33,5 @@ __all__ = [
     "EventInfo",
     "presign_mqtt_wss_url",
     "SceneInfo",
+    "uses_v3_firmware",
 ]

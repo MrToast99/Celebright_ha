@@ -1,0 +1,104 @@
+blueprint:
+  name: Celebright scene at sunset during a date range
+  description: >
+    Shows a scene every night from sunset while today is inside a yearly date range (it
+    may cross New Year), and hands control back to the schedule at sunrise.
+  domain: automation
+  author: MrToast99
+  source_url: https://github.com/MrToast99/Celebright_ha/blob/main/blueprints/automation/celebright/scene_in_date_range.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    scene_select:
+      name: Scene selector
+      description: Your controller's scene dropdown.
+      selector:
+        entity:
+          filter:
+            - domain: select
+              integration: celebright
+    scene:
+      name: Scene
+      description: Scene name exactly as in the dropdown.
+      selector:
+        text:
+    start_month:
+      name: Start month
+      default: 12
+      selector:
+        number:
+          min: 1
+          max: 12
+          mode: box
+    start_day:
+      name: Start day
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    end_month:
+      name: End month
+      default: 12
+      selector:
+        number:
+          min: 1
+          max: 12
+          mode: box
+    end_day:
+      name: End day
+      default: 31
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    off_option:
+      name: Resume-schedule option
+      description: The dropdown option that hands control back to the schedule.
+      default: "Off"
+      selector:
+        text:
+
+mode: single
+
+variables:
+  scene_select: !input scene_select
+  scene: !input scene
+  off_option: !input off_option
+  start_month: !input start_month
+  start_day: !input start_day
+  end_month: !input end_month
+  end_day: !input end_day
+  in_range: >-
+    {%- set md = now().month * 100 + now().day -%}
+    {%- set s = start_month | int * 100 + start_day | int -%}
+    {%- set e = end_month | int * 100 + end_day | int -%}
+    {{ (s <= md <= e) if s <= e else (md >= s or md <= e) }}
+
+triggers:
+  - trigger: sun
+    event: sunset
+    id: dusk
+  - trigger: sun
+    event: sunrise
+    id: dawn
+
+actions:
+  - choose:
+      - conditions: "{{ trigger.id == 'dusk' and in_range }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ scene }}"
+      # Sunrise: only if our scene is the one showing.
+      - conditions: "{{ trigger.id == 'dawn' and is_state(scene_select, scene) }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: !input scene_select
+            data:
+              option: "{{ off_option }}"

@@ -1,0 +1,41 @@
+{
+  "entity": {
+    "select": {
+      "scene": {
+        "name": "Scene",
+        "state": {
+          "off": "Off"
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Celebright",
+        "description": "Enter your Celebright account credentials.",
+        "data": {
+          "email": "Email address",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Celebright",
+        "description": "Celebright rejected the saved login for {email}. Enter your current password to reconnect.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to Celebright cloud.",
+      "invalid_auth": "Invalid email or password.",
+      "unknown": "Unexpected error — check the Home Assistant logs."
+    },
+    "abort": {
+      "already_configured": "This Celebright account is already configured.",
+      "reauth_successful": "Re-authentication successful. Celebright is reconnecting.",
+      "reauth_failed": "Could not find the Celebright account to re-authenticate."
+    }
+  }
+}

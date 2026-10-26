@@ -1,0 +1,208 @@
+# Celebright dashboard template. The `celebright.generate_dashboard` service fills in
+# your real entity IDs and device name ("house" / "House" below are placeholders) and
+# writes celebright_dashboard.yaml; regenerate after updating instead of editing it.
+title: Celebright
+views:
+  # --- 1. Lights (manual control, scene picker) ---
+  - title: Lights
+    path: celebright
+    icon: mdi:string-lights
+    cards:
+      - type: markdown
+        content: "## Celebright"
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Status
+            entities:
+              - entity: light.house
+                name: Lights
+              - entity: select.house_scene
+                name: Active Scene
+              - entity: sensor.house_current_display
+                name: Current Display
+              - entity: sensor.house_active_event
+                name: Active Event
+              - entity: sensor.house_next_event_start
+                name: Next Event Starts
+              - entity: binary_sensor.house_schedule
+                name: Schedule
+
+          - type: glance
+            title: Device Info
+            show_name: true
+            show_icon: true
+            entities:
+              - entity: sensor.house_model
+                name: Model
+              - entity: sensor.house_firmware
+                name: Firmware
+              - entity: sensor.house_led_count
+                name: LEDs
+
+      - type: light
+        entity: light.house
+        name: Manual Color / Brightness
+
+  # --- 2. Schedule (built-in calendar, read live) ---
+  - title: Schedule
+    path: schedule
+    icon: mdi:calendar-clock
+    cards:
+      - type: markdown
+        title: Next Event
+        content: |
+          {% set nxt = states('sensor.house_next_event_start') %}
+          {% set cur = states('sensor.house_active_event') %}
+          {% if cur not in ['None', 'unknown', 'unavailable', ''] %}
+          **Playing now:** {{ cur }}
+
+          {% endif %}
+          {% if nxt not in ['unknown', 'unavailable', 'none', 'None', ''] %}
+          **Next event starts:** {{ as_timestamp(nxt) | timestamp_custom('%A, %B %-d at %-I:%M %p') }}
+
+          _(controller's local time)_
+          {% else %}
+          _No upcoming event reported._
+          {% endif %}
+
+      - type: entities
+        title: Schedule Control
+        entities:
+          - entity: switch.house_schedule_enabled
+            name: Schedule Enabled
+          - entity: sensor.house_scheduled_events
+            name: Total Scheduled Events
+          - entity: select.house_scene
+            name: Override Scene
+        footer:
+          type: buttons
+          entities:
+            - entity: select.house_scene
+              name: Resume Schedule
+              tap_action:
+                action: perform-action
+                perform_action: select.select_option
+                target:
+                  entity_id: select.house_scene
+                data:
+                  option: "Off"
+
+      - type: markdown
+        title: Lighting Schedule
+        content: >
+          {% set evs = state_attr('sensor.house_scheduled_events', 'events') %}
+
+          {% if evs %}
+
+          | Event | Scene | When | Time |
+
+          |-------|-------|------|------|
+
+          {% for e in evs -%}
+
+          | {{ e.name }} | {{ e.scene }} | {{ e.when }} | {{ e.time }} |
+
+          {% endfor %}
+
+          {% else %}
+
+          _No scheduled events found._
+
+          {% endif %}
+
+      - type: button
+        name: Add / Edit / Remove Events
+        icon: mdi:calendar-edit
+        show_state: false
+        tap_action:
+          action: navigate
+          navigation_path: /developer-tools/action
+
+      - type: markdown
+        content: >
+          ### Editing the schedule
+
+          Tap **Add / Edit / Remove Events** above (or open **Developer Tools →
+          Actions**) and pick an action:
+
+
+          - **`celebright.create_event`**: add an event
+
+          - **`celebright.update_event`**: change one (by name or UUID)
+
+          - **`celebright.delete_event`**: remove one
+
+          - **`celebright.set_event_enabled`**: switch one on/off (newer controllers)
+
+
+          Event names and UUIDs are in the **Scheduled Events** sensor's attributes.
+          Selecting a scene overrides the schedule; **Resume Schedule** hands
+          control back.
+
+  # --- 3. Automations ---
+  - title: Automations
+    path: automations
+    icon: mdi:robot
+    cards:
+      - type: markdown
+        content: >
+          ## Celebright Automations
+
+          Create automations or open Home Assistant's editor to manage yours. (For
+          a live list here, see the optional card in the README.)
+
+      - type: horizontal-stack
+        cards:
+          - type: button
+            name: Create Automation
+            icon: mdi:plus-circle
+            tap_action:
+              action: navigate
+              navigation_path: /config/automation/edit/new
+          - type: button
+            name: Manage Automations
+            icon: mdi:cog
+            tap_action:
+              action: navigate
+              navigation_path: /config/automation/dashboard
+
+      - type: markdown
+        title: Building one in the GUI (read me first)
+        content: >
+          In the automation editor, scene control is **not** under "celebright"
+          (those actions edit the *schedule*). To activate a scene:
+
+
+          1. **Add Action** → search **`select`** → **"Select: Select option"**
+
+          2. **Targets → Choose entity** → **House Scene** (`select.house_scene`)
+
+          3. **Option** → one of your scene names, or **Off** to resume the schedule
+
+
+          Other actions: **Light: Turn on** → **House** (`light.house`) for
+          colour/brightness; search **`celebright`** to edit the schedule.
+
+
+          **Triggers** are normal HA triggers, e.g. *Numeric state* on a sensor
+          (aurora above 78), *Sun*, or *Time*.
+
+      - type: markdown
+        title: Example (YAML) - activate a scene at sunset
+        content: |
+          Same thing in YAML (paste via the action's **⋮ → Edit in YAML**):
+          ```yaml
+          alias: Celebright scene at sunset
+          triggers:
+            - trigger: sun
+              event: sunset
+          actions:
+            - action: select.select_option
+              target:
+                entity_id: select.house_scene
+              data:
+                option: "<one of your saved scene names>"
+          ```
+          Ready-made **blueprints** (holiday lighting and more) are listed in the README.

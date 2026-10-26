@@ -1,0 +1,41 @@
+blueprint:
+  name: Celebright resume the schedule at a time
+  description: Hands control back to the controller's own schedule at a set time each day.
+  domain: automation
+  author: MrToast99
+  source_url: https://github.com/MrToast99/Celebright_ha/blob/main/blueprints/automation/celebright/resume_schedule_at_time.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    scene_select:
+      name: Scene selector
+      description: Your controller's scene dropdown.
+      selector:
+        entity:
+          filter:
+            - domain: select
+              integration: celebright
+    time:
+      name: Time
+      default: "23:30:00"
+      selector:
+        time:
+    off_option:
+      name: Resume-schedule option
+      description: The dropdown option that hands control back to the schedule.
+      default: "Off"
+      selector:
+        text:
+
+mode: single
+
+triggers:
+  - trigger: time
+    at: !input time
+
+actions:
+  - action: select.select_option
+    target:
+      entity_id: !input scene_select
+    data:
+      option: !input off_option

@@ -1,22 +1,17 @@
-"""MQTT over WebSocket client for Celebright device control.
+"""MQTT-over-WebSocket client for Celebright controllers (AWS IoT, SigV4-signed URL).
 
-Celebright uses AWS IoT Core with SigV4-signed WebSocket URLs.
-All device commands are MQTT PUBLISH messages; state is read back
-from the device/systemState topic.
+Topics: devices/{id}/{ver}/app/{command} (we publish); .../device/... and .../server/...
+(we subscribe). {ver} is "v3" on firmware 3.x and "v2" on older controllers; a command on
+the wrong version is silently ignored, so the version is probed per device.
 
-Protocol facts from HAR analysis:
-  Subscribe: devices/{id}/v2/server/#  and  devices/{id}/v2/device/#
-  Commands:  devices/{id}/v2/app/{command}  (PUBLISH, QoS 0)
-  State:     devices/{id}/v2/device/systemState  (inbound PUBLISH)
-
-Commands confirmed:
-  setColor           {"color": "RRGGBB"}
-  setResumeSchedule  {}
-  getSystemState     {"UTCTimeFromApp": <epoch_int>}
+v3 replies arrive as `commandAck` and/or a `systemState` push; large ones are chunked
+(`msgChunk`).
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import copy
 import hashlib
 import hmac
 import json
@@ -32,12 +27,13 @@ import aiohttp
 import yarl
 
 from .base import CelebrightCommandError, CelebrightConnectionError
+from .events_v3 import utc_now_str
+from ..const import MQTT_DEFAULT_PROTOCOL, MQTT_PROTOCOLS
 
 _LOGGER = logging.getLogger(__name__)
 
-# aiohttp keeps returning one of these immediately (no blocking) once the
-# WebSocket is closed — without treating them as terminal, a receive loop
-# would spin hot until its deadline instead of failing fast.
+# aiohttp returns these instantly once the socket is closed; treat them as terminal
+# so receive loops fail fast instead of spinning.
 _TERMINAL_WS_TYPES = {
     aiohttp.WSMsgType.CLOSE,
     aiohttp.WSMsgType.CLOSING,
@@ -45,9 +41,7 @@ _TERMINAL_WS_TYPES = {
     aiohttp.WSMsgType.ERROR,
 }
 
-# -----------------------------------------------------------------------
-# SigV4 URL presigning
-# -----------------------------------------------------------------------
+# --- SigV4 URL presigning ---
 
 _SERVICE = "iotdevicegateway"
 _ALGORITHM = "AWS4-HMAC-SHA256"
@@ -73,11 +67,8 @@ def presign_mqtt_wss_url(
 
     _enc = lambda v: urllib.parse.quote(v, safe="")
 
-    # For IoT MQTT WebSocket presigning the Security-Token is NOT part of the
-    # signed query string — it is appended after the signature. This matches
-    # how Amplify Flutter (and the official AWS IoT JS SDK) build the URL.
-    # Including the token in the canonical QS produces a different signature
-    # than what AWS IoT expects, resulting in a 403.
+    # IoT signs the query WITHOUT Security-Token and appends the token afterwards
+    # (as Amplify and the AWS IoT JS SDK do); signing it too gives a 403.
     qs_to_sign: dict[str, str] = {
         "X-Amz-Algorithm": _ALGORITHM,
         "X-Amz-Credential": credential,
@@ -119,9 +110,7 @@ def presign_mqtt_wss_url(
     )
 
 
-# -----------------------------------------------------------------------
-# Minimal MQTT 3.1.1 framing (QoS 0 only — matches what the app uses)
-# -----------------------------------------------------------------------
+# --- Minimal MQTT 3.1.1 framing (QoS 0 only — matches what the app uses) ---
 
 def _encode_remaining(n: int) -> bytes:
     out = []
@@ -161,10 +150,6 @@ def build_publish(topic: str, payload: str) -> bytes:
     return bytes([0x30]) + _encode_remaining(len(body)) + body
 
 
-def build_pingreq() -> bytes:
-    return bytes([0xC0, 0x00])
-
-
 def build_disconnect() -> bytes:
     return bytes([0xE0, 0x00])
 
@@ -187,13 +172,9 @@ def compute_event_md5(
     by_month: int | None,
     by_set_pos: int | None,
 ) -> str:
-    """Replicate the Celebright app's event md5 (reverse-engineered from main.dart.js `cMK`).
-
-    Preimage = no-separator concatenation in this exact field order, with null → "":
-      uuid + device_preset_uuid + event_name + priority + start_date + start_time
-      + end_date + end_time + frequency + interval + repeat_until + byDay
-      + byMonthDay + byMonth + bySetPos
-    Then md5 hex (lowercase, zero-padded to 32). Verified against 9 server events + 1 app write.
+    """The app's legacy (v2) event md5: MD5 of these fields concatenated, no separators, null -> "":
+    uuid, device_preset_uuid, event_name, priority, start_date, start_time, end_date,
+    end_time, frequency, interval, repeat_until, byDay, byMonthDay, byMonth, bySetPos.
     """
     import hashlib
 
@@ -243,9 +224,76 @@ def parse_incoming(data: bytes) -> tuple[int, str, str] | None:
     return ptype, topic, payload
 
 
-# -----------------------------------------------------------------------
-# High-level MQTT client
-# -----------------------------------------------------------------------
+# --- High-level MQTT client ---
+
+class MessageAssembler:
+    """Reassembles chunked controller messages (topic suffix "msgChunk").
+
+    Pieces are {"id","seq","total","data"} (base64 slices of a JSON envelope
+    {"topic","message"}); other messages pass through. feed() returns None until complete.
+    """
+
+    _MAX_PENDING = 16
+
+    def __init__(self) -> None:
+        self._pending: dict[Any, dict[int, str]] = {}
+
+    def feed(self, topic: str, payload: str) -> tuple[str, str] | None:
+        if not topic.endswith("/msgChunk"):
+            return topic, payload
+        try:
+            msg = json.loads(payload)
+            chunk_id, seq, total, data = msg["id"], int(msg["seq"]), int(msg["total"]), msg["data"]
+        except (ValueError, KeyError, TypeError):
+            return None
+        if total < 1 or not 0 <= seq < total or not isinstance(data, str):
+            self._pending.pop(chunk_id, None)
+            return None
+        if chunk_id not in self._pending and len(self._pending) >= self._MAX_PENDING:
+            self._pending.pop(next(iter(self._pending)))
+        parts = self._pending.setdefault(chunk_id, {})
+        parts[seq] = data
+        if len(parts) < total:
+            return None
+        del self._pending[chunk_id]
+        try:
+            envelope = json.loads(
+                b"".join(base64.b64decode(parts[i]) for i in range(total)).decode("utf-8")
+            )
+        except (KeyError, ValueError):
+            return None
+        if not (isinstance(envelope, dict) and isinstance(envelope.get("topic"), str)):
+            return None
+        inner = envelope.get("message")
+        prefix = topic.rsplit("/", 1)[0]
+        return f"{prefix}/{envelope['topic']}", json.dumps(inner if inner is not None else {})
+
+
+# Commands already warned about this run (their silence is normal).
+_UNACKED_REPORTED: set[str] = set()
+
+
+def _brightness_verdict(state: dict[str, Any], wanted: int) -> bool | None:
+    scene = state.get("currentScene") or []
+    look = (scene[0].get("lookData") or {}) if scene and isinstance(scene[0], dict) else {}
+    level = look.get("brightness")
+    if not isinstance(level, (int, float)) or isinstance(level, bool):
+        return None
+    return abs(int(level) - int(wanted)) <= 2
+
+
+def _resume_verdict(state: dict[str, Any]) -> bool | None:
+    if "active_source" not in state:
+        return None
+    return state["active_source"] != "user_display"
+
+
+def _scale_hex(hex_color: str, brightness: int) -> str:
+    """Bake a 0-255 brightness into an RRGGBB colour (what v2 controllers expect)."""
+    scale = max(0, min(255, brightness)) / 255.0
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    return f"{round(r * scale):02X}{round(g * scale):02X}{round(b * scale):02X}"
+
 
 class CelebrightMQTT:
     """Fire-and-forget MQTT command sender + one-shot state reader."""
@@ -258,6 +306,7 @@ class CelebrightMQTT:
         session_token: str,
         region: str,
         endpoint: str,
+        protocol: str = MQTT_DEFAULT_PROTOCOL,
     ) -> None:
         self._device_id = device_id
         self._access_key = access_key
@@ -265,12 +314,26 @@ class CelebrightMQTT:
         self._session_token = session_token
         self._region = region
         self._endpoint = endpoint
+        self._protocol = protocol
+
+    @property
+    def protocol(self) -> str:
+        return self._protocol
+
+    def with_protocol(self, protocol: str) -> "CelebrightMQTT":
+        """Copy of this client that talks the given topic protocol ("v2"/"v3")."""
+        other = copy.copy(self)
+        other._protocol = protocol
+        return other
 
     def _app_topic(self, command: str) -> str:
-        return f"devices/{self._device_id}/v2/app/{command}"
+        return f"devices/{self._device_id}/{self._protocol}/app/{command}"
+
+    def _device_topic(self, subtopic: str) -> str:
+        return f"devices/{self._device_id}/{self._protocol}/device/{subtopic}"
 
     def _state_topic(self) -> str:
-        return f"devices/{self._device_id}/v2/device/systemState"
+        return self._device_topic("systemState")
 
     async def _connect(self, session: aiohttp.ClientSession) -> aiohttp.ClientWebSocketResponse:
         url = presign_mqtt_wss_url(
@@ -281,9 +344,8 @@ class CelebrightMQTT:
             self._endpoint,
         )
         try:
-            # yarl.URL(..., encoded=True) prevents aiohttp/yarl from re-encoding
-            # the already-signed query string — decoding %2F back to / in the token
-            # would make the actual URL differ from what was signed, causing a 403.
+            # encoded=True stops yarl re-encoding the signed query (e.g. %2F in the token),
+            # which would make the URL differ from what was signed (403).
             ws = await session.ws_connect(
                 yarl.URL(url, encoded=True),
                 protocols=["mqtt", "mqttv3.1", "mqttv3.11"],
@@ -334,18 +396,54 @@ class CelebrightMQTT:
                 except Exception:
                     pass
 
-    async def async_get_system_state(self) -> dict[str, Any]:
-        """Request and return the device systemState via MQTT."""
-        state_topic = self._state_topic()
-        received: dict[str, Any] = {}
+    async def _await_message(
+        self, ws: aiohttp.ClientWebSocketResponse, accept, timeout: float
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Wait for a PUBLISH for which accept(topic, body) is true; None on timeout
+        or a closed socket. Chunked (msgChunk) messages are reassembled first."""
+        assembler = MessageAssembler()
+        deadline = time.monotonic() + timeout
+        while (remaining := deadline - time.monotonic()) > 0:
+            try:
+                async with asyncio.timeout(remaining):
+                    msg = await ws.receive()
+            except asyncio.TimeoutError:
+                return None
+            if msg.type in _TERMINAL_WS_TYPES:
+                return None
+            if msg.type != aiohttp.WSMsgType.BINARY:
+                continue
+            parsed = parse_incoming(msg.data)
+            if not parsed:
+                continue
+            fed = assembler.feed(parsed[1], parsed[2])
+            if fed is None:
+                continue
+            topic, payload = fed
+            try:
+                body = json.loads(payload)
+            except json.JSONDecodeError:
+                body = {}
+            if not isinstance(body, dict):
+                body = {}
+            if accept(topic, body):
+                return topic, body
+        return None
 
+    async def _await_topic(
+        self, ws: aiohttp.ClientWebSocketResponse, topic: str, timeout: float
+    ) -> dict[str, Any] | None:
+        """Wait for a PUBLISH on `topic`; None on timeout or a closed socket."""
+        got = await self._await_message(ws, lambda t, _b: t == topic, timeout)
+        return got[1] if got else None
+
+    async def async_get_system_state(self, timeout: float = 5.0) -> dict[str, Any]:
+        """Request and return the device systemState via MQTT ({} if none arrives)."""
         async with aiohttp.ClientSession() as session:
             ws = await self._connect(session)
             try:
                 # Subscribe to the device topic so we receive the response
-                await ws.send_bytes(
-                    build_subscribe(f"devices/{self._device_id}/v2/device/#")
-                )
+                await ws.send_bytes(build_subscribe(self._device_topic("#")))
 
                 # Request state
                 await ws.send_bytes(
@@ -354,30 +452,7 @@ class CelebrightMQTT:
                         json.dumps({"UTCTimeFromApp": int(time.time())}),
                     )
                 )
-
-                # Wait up to 5 s for systemState response
-                deadline = time.monotonic() + 5.0
-                while time.monotonic() < deadline:
-                    remaining = deadline - time.monotonic()
-                    try:
-                        async with asyncio.timeout(remaining):
-                            msg = await ws.receive()
-                    except asyncio.TimeoutError:
-                        break
-
-                    if msg.type in _TERMINAL_WS_TYPES:
-                        break
-                    if msg.type != aiohttp.WSMsgType.BINARY:
-                        continue
-
-                    parsed = parse_incoming(msg.data)
-                    if parsed and parsed[1] == state_topic:
-                        try:
-                            received = json.loads(parsed[2])
-                        except json.JSONDecodeError:
-                            pass
-                        break
-
+                received = await self._await_topic(ws, self._state_topic(), timeout)
             finally:
                 try:
                     await ws.send_bytes(build_disconnect())
@@ -385,23 +460,196 @@ class CelebrightMQTT:
                 except Exception:
                     pass
 
-        return received
+        return received or {}
 
-    # ------------------------------------------------------------------
-    # Convenience command wrappers
-    # ------------------------------------------------------------------
+    async def async_probe_protocol(self, timeout: float = 4.0) -> str | None:
+        """Which topic protocol answers ("v3" first, then "v2"); None if neither (e.g. offline)."""
+        for protocol in MQTT_PROTOCOLS:
+            state = await self.with_protocol(protocol).async_get_system_state(timeout)
+            if state:
+                return protocol
+        return None
 
-    async def async_set_color(self, hex_color: str) -> None:
-        """Turn on with a solid hex color (e.g. 'FFFFFF')."""
-        await self.async_send_command("setColor", {"color": hex_color.upper()})
+    async def _send_confirmed(
+        self,
+        command: str,
+        payload: dict[str, Any],
+        timeout: float = 5.0,
+        strict: bool = True,
+        warn: bool = True,
+        verify=None,
+        ack_phase: str | None = None,
+    ) -> dict[str, Any]:
+        """Publish a command and wait for the controller's reply (`commandAck` and/or `systemState`).
+
+        A failure ack always raises. On silence: strict raises; non-strict first checks the
+        controller is alive (getSystemState; dead raises), then `verify(state)` may decide
+        (True/False; None = can't tell), else it warns once per command.
+        `ack_phase`: wait for that final ack phase ("databaseWrite" follows "commandAccept");
+        a first-phase ack alone still counts as success.
+        """
+        state_topic = self._state_topic()
+        ack_topic = self._device_topic("commandAck")
+        error_topic = self._device_topic("logDeviceError")
+
+        def accept(topic: str, body: dict[str, Any]) -> bool:
+            if topic == error_topic:  # e.g. "Unrecognized topic [setFoo] No action taken"
+                return f"[{command}]" in str(body.get("message", ""))
+            return topic == state_topic or (
+                topic == ack_topic and body.get("command") == command
+            )
+
+        alive: dict[str, Any] | None = None
+        async with aiohttp.ClientSession() as session:
+            ws = await self._connect(session)
+            try:
+                await ws.send_bytes(build_subscribe(self._device_topic("#")))
+                await ws.send_bytes(
+                    build_publish(self._app_topic(command), json.dumps(payload))
+                )
+                got = None
+                accepted = None
+                deadline = time.monotonic() + timeout
+                while (remaining := deadline - time.monotonic()) > 0:
+                    msg = await self._await_message(ws, accept, remaining)
+                    if msg is None:
+                        break
+                    topic, body = msg
+                    failed = str(body.get("status", "")).lower() == "failure"
+                    if (
+                        topic == ack_topic and not failed and ack_phase
+                        and body.get("phase") != ack_phase
+                    ):
+                        accepted = msg  # earlier phase succeeded; wait for the final one
+                        continue
+                    got = msg
+                    break
+                if got is None:
+                    got = accepted
+                if got is None and not strict:
+                    await ws.send_bytes(
+                        build_publish(
+                            self._app_topic("getSystemState"),
+                            json.dumps({"UTCTimeFromApp": int(time.time())}),
+                        )
+                    )
+                    alive = await self._await_topic(ws, state_topic, 3.0)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                raise CelebrightCommandError(f"{command} failed: {err}") from err
+            finally:
+                try:
+                    await ws.send_bytes(build_disconnect())
+                    await ws.close()
+                except Exception:
+                    pass
+
+        if got is not None:
+            topic, body = got
+            if topic == error_topic:
+                raise CelebrightCommandError(
+                    f"{command}: the controller rejected it: {body.get('message')}"
+                )
+            if topic == ack_topic and str(body.get("status", "")).lower() == "failure":
+                raise CelebrightCommandError(
+                    f"{command} was rejected by the controller: {body}"
+                )
+            return body
+        if strict or alive is None:
+            raise CelebrightCommandError(
+                f"{command}: the controller did not respond on MQTT protocol "
+                f"{self._protocol} (is it online?)"
+            )
+        verdict = verify(alive) if verify is not None else None
+        if verdict is True:
+            _LOGGER.debug("%s has no acknowledgement; confirmed from the controller's state", command)
+            return alive
+        if verdict is False:
+            raise CelebrightCommandError(
+                f"{command}: the controller is online but its reported state doesn't "
+                "show the change"
+            )
+        if warn:
+            level = _LOGGER.debug if command in _UNACKED_REPORTED else _LOGGER.warning
+            _UNACKED_REPORTED.add(command)
+            level(
+                "%s was not acknowledged by the controller and its state can't confirm "
+                "it (the controller is online, so the command may have been ignored)",
+                command,
+            )
+        return alive
+
+    @property
+    def _is_v3(self) -> bool:
+        return self._protocol == "v3"
+
+    async def async_set_color(self, hex_color: str, brightness: int | None = None) -> None:
+        """Solid colour (full-brightness RRGGBB) with optional 0-255 brightness (v2 bakes it in)."""
+        color = hex_color.upper()
+        if self._is_v3:
+            payload: dict[str, Any] = {"color": color, "source": "user_display"}
+            if brightness is not None:
+                payload["brightness"] = int(brightness)
+            await self._send_confirmed("setColor", payload)
+        else:
+            if brightness is not None:
+                color = _scale_hex(color, brightness)
+            await self.async_send_command("setColor", {"color": color})
+
+    async def async_set_brightness(self, brightness: int, base_hex: str) -> None:
+        """Brightness only: v3 dims whatever is showing; v2 can only resend base_hex scaled."""
+        if self._is_v3:
+            await self._send_confirmed(
+                "setBrightness", {"brightness": int(brightness)}, strict=False,
+                verify=lambda st: _brightness_verdict(st, brightness),
+            )
+        else:
+            await self.async_set_color(base_hex, brightness)
 
     async def async_load_scene(self, scene_uuid: str) -> None:
         """Activate a saved scene by UUID."""
-        await self.async_send_command("loadSavedScene", {"savedSceneUuid": scene_uuid})
+        if self._is_v3:
+            await self._send_confirmed(
+                "loadSavedScene",
+                {"savedSceneUuid": scene_uuid, "source": "user_display"},
+                strict=False,
+            )
+        else:
+            await self.async_send_command(
+                "loadSavedScene", {"savedSceneUuid": scene_uuid}
+            )
+
+    async def async_turn_off(self) -> None:
+        """Lights off. v3 has a real turnOff; v2 only has "resume the schedule"."""
+        if self._is_v3:
+            await self._send_confirmed("turnOff", {})
+        else:
+            await self.async_send_command("setResumeSchedule", {})
 
     async def async_resume_schedule(self) -> None:
-        """Return the device to its scheduled display (effectively 'off' from manual mode)."""
-        await self.async_send_command("setResumeSchedule", {})
+        """Hand control back to the schedule (same command on v2 and v3)."""
+        if self._is_v3:
+            await self._send_confirmed(
+                "setResumeSchedule", {}, strict=False, verify=_resume_verdict
+            )
+        else:
+            await self.async_send_command("setResumeSchedule", {})
+
+    async def async_set_schedule_enabled(self, enabled: bool) -> None:
+        """Enable/disable the on-device schedule (v2 only; v3 firmware rejects the command)."""
+        if self._is_v3:
+            raise CelebrightCommandError(
+                "Firmware 3.x has no global schedule switch (the controller rejects the "
+                "command); use celebright.set_event_enabled to switch individual events."
+            )
+        await self.async_send_command("setEnableSchedule", {"scheduleEnabled": bool(enabled)})
+
+    def _require_v2_for_schedule_writes(self, command: str) -> None:
+        if self._is_v3:
+            raise CelebrightCommandError(
+                f"{command}: editing the on-device schedule isn't supported yet on "
+                "this controller's newer protocol (v3). Viewing the schedule still "
+                "works; use the Celebright app to change it."
+            )
 
     async def _publish_and_await(
         self,
@@ -411,15 +659,14 @@ class CelebrightMQTT:
         timeout: float,
     ) -> dict[str, Any]:
         """Publish an app command and wait for a specific device/<subtopic> ack."""
-        success_topic = f"devices/{self._device_id}/v2/device/{success_subtopic}"
+        self._require_v2_for_schedule_writes(command)
+        success_topic = self._device_topic(success_subtopic)
         ack: dict[str, Any] = {}
 
         async with aiohttp.ClientSession() as session:
             ws = await self._connect(session)
             try:
-                await ws.send_bytes(
-                    build_subscribe(f"devices/{self._device_id}/v2/device/#")
-                )
+                await ws.send_bytes(build_subscribe(self._device_topic("#")))
                 await ws.send_bytes(
                     build_publish(self._app_topic(command), json.dumps(payload))
                 )
@@ -463,17 +710,39 @@ class CelebrightMQTT:
         return ack
 
     async def async_save_event(self, event: dict[str, Any], timeout: float = 8.0) -> dict[str, Any]:
-        """Create or update a schedule event (same uuid = update); await saveEventSuccess.
-
-        `event` must be a fully-formed event dict (snake_case keys, with a valid `md5`).
-        Returns the ack payload, e.g. {"name": "...", "uuid": "..."}.
-        """
+        """Create or update (same uuid) an event; v2 awaits saveEventSuccess."""
+        if self._is_v3:
+            # The save reply isn't relied on; the caller confirms by reading the event back.
+            return await self._send_confirmed(
+                "saveEvent", {"event": event}, timeout, strict=False, warn=False,
+                ack_phase="databaseWrite",
+            )
         return await self._publish_and_await(
             "saveEvent", {"event": event}, "saveEventSuccess", timeout
         )
 
     async def async_delete_event(self, event_uuid: str, timeout: float = 8.0) -> dict[str, Any]:
         """Delete a schedule event by UUID; await deleteEventSuccess. Returns {"uuid": ...}."""
+        if self._is_v3:
+            return await self._send_confirmed(
+                "deleteEvent", {"eventUuid": event_uuid}, timeout, strict=False, warn=False,
+                ack_phase="databaseWrite",
+            )
         return await self._publish_and_await(
             "deleteEvent", {"eventUuid": event_uuid}, "deleteEventSuccess", timeout
+        )
+
+    async def async_set_event_enabled(
+        self, event_uuid: str, enabled: bool, timeout: float = 8.0
+    ) -> dict[str, Any]:
+        """Enable/disable one schedule event (v3 only)."""
+        if not self._is_v3:
+            raise CelebrightCommandError(
+                "Enabling or disabling a single event needs a controller on the newer "
+                "protocol (v3)."
+            )
+        return await self._send_confirmed(
+            "setEventEnabled",
+            {"eventUuid": event_uuid, "enabled": bool(enabled), "last_modified_utc": utc_now_str()},
+            timeout, strict=False, warn=False, ack_phase="databaseWrite",
         )

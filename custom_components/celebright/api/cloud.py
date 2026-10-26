@@ -1,19 +1,19 @@
-"""Celebright cloud API — REST polling + AWS IoT MQTT control.
-
-Auth:    Cognito USER_PASSWORD_AUTH → IdToken (REST) + temp AWS creds (MQTT)
-State:   POST app-api.celebright.com/getUserDeviceStatuses  (REST, polled)
-Control: MQTT PUBLISH via AWS IoT WebSocket (SigV4 signed)
-"""
+"""Celebright cloud client: Cognito login, REST + AppSync status, MQTT control."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 from typing import Any
 
 import aiohttp
 
+from . import events_v3
+from .appsync import build_status_query, parse_status_response
 from .auth import CelebrightAuth
 from .base import (
+    uses_v3_firmware,
     CelebrightAPIBase,
     CelebrightAuthError,
     CelebrightCommandError,
@@ -27,14 +27,17 @@ from .base import (
 from .mqtt import CelebrightMQTT, compute_event_md5
 from ..const import (
     API_BASE,
+    APPSYNC_URL,
     AWS_REGION,
     CURRENT_DISPLAY_FIELD,
     DISPLAY_OFF,
+    EP_GET_DEVICE_EVENTS,
     EP_GET_DEVICE_SCENES,
     EP_GET_DEVICE_STATUSES,
     EP_GET_USER_DATA,
     IOT_ENDPOINT,
     MQTT_ACTIVE_SCENE_FIELD,
+    MQTT_DEFAULT_PROTOCOL,
     MQTT_STATE_BRIGHTNESS_FIELD,
     MQTT_STATE_COLOR_FIELD,
     SCHEDULE_ENABLED_FIELD,
@@ -44,6 +47,13 @@ from ..const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# After a failed protocol probe, don't re-probe from the 30 s poll for this long.
+_PROBE_BACKOFF_SECONDS = 300
+# After a failed AppSync status request, use MQTT/REST-only for this long.
+_GRAPHQL_BACKOFF_SECONDS = 300
+# The AppSync status has no schedule on/off flag; ask the controller this often.
+_SCHEDULE_PROBE_SECONDS = 900
 
 # --- Schedule decoding helpers ------------------------------------------
 
@@ -164,7 +174,8 @@ def _parse_device_status(
         available=raw.get(STATUS_FIELD) == STATUS_ONLINE,
         is_on=raw.get(STATE_FIELD, 0) != 0,
         current_display=raw.get(CURRENT_DISPLAY_FIELD, DISPLAY_OFF),
-        schedule_enabled=raw.get(SCHEDULE_ENABLED_FIELD, False),
+        # Newer (v3) status payloads dropped this field — unknown, not "off".
+        schedule_enabled=raw.get(SCHEDULE_ENABLED_FIELD),
         raw=raw,
     )
     if info:
@@ -175,17 +186,26 @@ def _parse_device_status(
     return state
 
 
-def _merge_system_state(state: DeviceState, system_state: dict[str, Any]) -> None:
-    """Merge an MQTT systemState payload onto a DeviceState, best-effort.
+def _schedule_flag(system_state: dict[str, Any]) -> bool | None:
+    """systemState.scheduleEnabled (1/0) -> bool, None when not reported."""
+    if "scheduleEnabled" not in system_state:
+        return None
+    return system_state["scheduleEnabled"] in (1, True, "1", "true", "True")
 
-    Only the active-scene field is confirmed against a live capture; color and
-    brightness are populated opportunistically and simply left as None if the
-    expected keys aren't present (see the field-name caveat in const.py).
-    """
+
+def _merge_system_state(state: DeviceState, system_state: dict[str, Any]) -> None:
+    """Merge a v2 MQTT systemState onto a DeviceState (best effort; unknown keys stay None)."""
     if not system_state:
         return
 
+    if "active_source" in system_state:  # protocol v3
+        _merge_system_state_v3(state, system_state)
+        return
+
     state.active_scene_uuid = system_state.get(MQTT_ACTIVE_SCENE_FIELD) or None
+    flag = _schedule_flag(system_state)
+    if flag is not None:
+        state.schedule_enabled = flag
 
     color = system_state.get(MQTT_STATE_COLOR_FIELD)
     if isinstance(color, str) and len(color) >= 6:
@@ -196,14 +216,89 @@ def _merge_system_state(state: DeviceState, system_state: dict[str, Any]) -> Non
         except ValueError:
             pass
         else:
-            # The device has no independent brightness channel — setColor bakes
-            # brightness into the RGB magnitude — so derive it from the color
-            # unless the device separately reports one below.
+            # No separate brightness channel: setColor bakes it into the RGB, so use the peak.
             state.brightness = max(r, g, b)
 
     brightness = system_state.get(MQTT_STATE_BRIGHTNESS_FIELD)
     if isinstance(brightness, (int, float)):
         state.brightness = int(brightness)
+
+
+def _merge_system_state_v3(state: DeviceState, system_state: dict[str, Any]) -> None:
+    """Merge a v3 systemState: active_source, plus brightness/colour of the first look.
+
+    lookType 1 = solid colour, 2 = pattern (no colour); the scene UUID isn't reported.
+    """
+    if system_state.get("active_source") is not None:
+        state.active_source = system_state["active_source"]
+    flag = _schedule_flag(system_state)
+    if flag is not None:
+        state.schedule_enabled = flag
+    scene = system_state.get("currentScene") or []
+    look = (scene[0].get("lookData") or {}) if scene and isinstance(scene[0], dict) else {}
+
+    # v3 brightness is its own 0-255 field on every look (solid colour or pattern).
+    bright = look.get("brightness")
+    has_brightness = isinstance(bright, (int, float)) and not isinstance(bright, bool)
+    if has_brightness:
+        state.brightness = max(0, min(255, int(bright)))
+
+    color = look.get("color")
+    if not (isinstance(color, str) and len(color) >= 6):
+        return
+    hex_color = color.lstrip("#").upper()
+    try:
+        r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return
+    state.color_hex = hex_color
+    if not has_brightness:
+        # No brightness reported: use the colour's peak channel.
+        state.brightness = max(r, g, b)
+
+
+def _first_graphql_error(body: dict[str, Any]) -> str:
+    errors = body.get("errors") or [{}]
+    first = errors[0]
+    if isinstance(first, dict):
+        kind, msg = first.get("errorType"), first.get("message")
+        return "AppSync error: " + ": ".join(str(x) for x in (kind, msg) if x)
+    return f"AppSync error: {first}"
+
+
+def _graphql_unauthorized(body: dict[str, Any]) -> bool:
+    for err in body.get("errors") or []:
+        text = f"{err.get('errorType', '')} {err.get('message', '')}" if isinstance(err, dict) else str(err)
+        if "unauthorized" in text.lower() or "not authorized" in text.lower():
+            return True
+    return False
+
+
+def _as_uuid(value: Any) -> str | None:
+    """activeSavedScene / activeEvent: a uuid string (or an object carrying one)."""
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, dict):
+        return value.get("uuid") or value.get("id") or None
+    return None
+
+
+def _merge_graphql_status(state: DeviceState, item: dict[str, Any]) -> None:
+    """Merge one AppSync getDeviceStatusV3 item onto a DeviceState."""
+    state.active_source = item.get("activeSource")
+    state.active_scene_uuid = _as_uuid(item.get("activeSavedScene"))
+    state.active_event_uuid = _as_uuid(item.get("activeEvent"))
+    state.next_event_start = item.get("nextEventStartLocal")
+    state.sleep_timer = item.get("sleepTimer")
+    state.scene_known = True  # AppSync reports "no scene" explicitly (null)
+
+    scene = item.get("currentScene")
+    if isinstance(scene, str):  # JSON-encoded string, e.g. "[]"
+        try:
+            scene = json.loads(scene)
+        except ValueError:
+            scene = []
+    _merge_system_state_v3(state, {"currentScene": scene if isinstance(scene, list) else []})
 
 
 def _mqtt_for_device(device_id: str, auth: CelebrightAuth) -> CelebrightMQTT:
@@ -227,37 +322,84 @@ class CelebrightCloudAPI(CelebrightAPIBase):
         self._session: aiohttp.ClientSession | None = None
         self._auth: CelebrightAuth | None = None
         self._device_infos: dict[str, DeviceInfo] = {}
+        # Per-device MQTT topic protocol ("v3"/"v2"), detected on first use.
+        self._protocols: dict[str, str] = {}
+        self._probe_retry_at: dict[str, float] = {}
+        self._graphql_retry_at = 0.0
+        self._graphql_failed_before = False
+        self._graphql_ok_logged = False
+        self._graphql_token_kind = "access"  # which token AppSync accepted
+        # Last known schedule on/off per device (reported, or set by us)
+        self._schedule_enabled: dict[str, bool] = {}
+        self._schedule_probe_at: dict[str, float] = {}
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
+    # --- Lifecycle ---
 
     async def async_connect(self) -> None:
         self._session = aiohttp.ClientSession()
         self._auth = CelebrightAuth(self._email, self._password, self._session)
-        await self._auth.async_authenticate()
-        self._device_infos = await self.async_get_device_infos()
+        try:
+            await self._auth.async_authenticate()
+            self._device_infos = await self.async_get_device_infos()
+        except BaseException:
+            # Setup failed: nothing else will close this session.
+            await self.async_disconnect()
+            raise
 
     async def async_disconnect(self) -> None:
         if self._session:
             await self._session.close()
             self._session = None
 
-    # ------------------------------------------------------------------
-    # Read (REST)
-    # ------------------------------------------------------------------
+    # --- Read (REST) ---
 
     async def async_get_device_infos(self) -> dict[str, DeviceInfo]:
         data = await self._post(EP_GET_USER_DATA, {"email": self._email})
         devices: dict[str, Any] = data.get("devices", {})
-        # Keep self._device_infos in sync on every call (not just the initial
-        # connect) — async_get_device_statuses() merges name/model/num_leds/
-        # is_rgbw from this cache, and it must reflect the latest refresh.
+        # Statuses merge name/model/etc. from this cache, so refresh it on every call.
         self._device_infos = {
             dev_id: _parse_device_info(dev_id, dev_raw)
             for dev_id, dev_raw in devices.items()
         }
+        # v3 controllers keep richer events (anchors, offsets, RRULE, enabled) than getUserData.
+        for dev_id, info in self._device_infos.items():
+            v3_events = await self._get_v3_events(dev_id, info)
+            if v3_events is not None:
+                info.events = v3_events
         return self._device_infos
+
+    async def _get_events_raw(self, device_id: str) -> list[dict[str, Any]] | None:
+        """The device's events from getDeviceEvents (None if unavailable)."""
+        try:
+            data = await self._post(EP_GET_DEVICE_EVENTS, {"deviceId": device_id})
+        except CelebrightError as err:
+            _LOGGER.debug("getDeviceEvents failed for %s: %s", device_id, err)
+            return None
+        events = data.get("events") if isinstance(data, dict) else None
+        return events if isinstance(events, list) else None
+
+    async def _get_v3_events(self, device_id: str, info: DeviceInfo):
+        raw = await self._get_events_raw(device_id)
+        if raw is None:
+            return None
+        if not raw:
+            # Empty counts only if the legacy list is empty too (older accounts may return nothing).
+            return [] if not info.events else None
+        if not events_v3.is_v3_event_list(raw):
+            return None
+        return events_v3.parse_events(raw)
+
+    async def _wait_for_event(self, device_id: str, event_uuid: str, matches, attempts: int = 5, delay: float = 2.0) -> bool:
+        """Poll until matches(event_or_None, is_last_try) holds; writes reach the cloud shortly after the command."""
+        for attempt in range(attempts):
+            raw = await self._get_events_raw(device_id)
+            if raw is not None:
+                found = next((e for e in raw if isinstance(e, dict) and e.get("uuid") == event_uuid), None)
+                if matches(found, attempt == attempts - 1):
+                    return True
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+        return False
 
     async def async_get_scenes(self, device_id: str) -> list[SceneInfo]:
         data = await self._post(EP_GET_DEVICE_SCENES, {"deviceId": device_id})
@@ -276,44 +418,194 @@ class CelebrightCloudAPI(CelebrightAPIBase):
             for dev_id, status_raw in data.items()
         }
 
-        # Color/brightness/active-scene aren't in the REST payload — pull them
-        # from MQTT systemState for devices that are actually on. Best-effort:
-        # a device that's slow or briefly unreachable shouldn't fail the whole poll.
-        assert self._auth
-        await self._auth.async_ensure_valid()
+        # Preferred source for colour, scene and event: the app's AppSync status (one call for all devices).
+        graphql = await self._graphql_statuses(list(statuses))
+
+        # Fallback (no AppSync record, or unavailable): MQTT systemState from each powered-on
+        # controller. Best effort; a slow device must not fail the poll.
         for device_id, state in statuses.items():
-            if not state.available or not state.is_on:
-                continue
-            try:
-                mqtt = _mqtt_for_device(device_id, self._auth)
-                system_state = await mqtt.async_get_system_state()
-            except CelebrightError as err:
-                _LOGGER.debug("systemState fetch failed for %s: %s", device_id, err)
-                continue
-            _merge_system_state(state, system_state)
+            item = graphql.get(device_id)
+            if item is not None:
+                _merge_graphql_status(state, item)
+                await self._probe_schedule_flag(device_id, state)
+            elif state.available and state.is_on:
+                try:
+                    mqtt = await self._mqtt(device_id, allow_probe_backoff=True)
+                    system_state = await mqtt.async_get_system_state() if mqtt else {}
+                except CelebrightError as err:
+                    _LOGGER.debug("systemState fetch failed for %s: %s", device_id, err)
+                    system_state = {}
+                _merge_system_state(state, system_state)
+
+            # Remember the schedule flag; reuse the last known one when a poll doesn't carry it.
+            if state.schedule_enabled is not None:
+                self._schedule_enabled[device_id] = state.schedule_enabled
+            else:
+                state.schedule_enabled = self._schedule_enabled.get(device_id)
 
         return statuses
 
-    # ------------------------------------------------------------------
-    # Write (MQTT)
-    # ------------------------------------------------------------------
+    async def _probe_schedule_flag(self, device_id: str, state: DeviceState) -> None:
+        """AppSync has no schedule flag; ask the controller occasionally (MQTT systemState may carry it)."""
+        if state.schedule_enabled is not None or not state.available:
+            return
+        if uses_v3_firmware(self._device_infos.get(device_id)):
+            return  # v3 never reports it
+        if time.monotonic() < self._schedule_probe_at.get(device_id, 0.0):
+            return
+        self._schedule_probe_at[device_id] = time.monotonic() + _SCHEDULE_PROBE_SECONDS
+        try:
+            mqtt = await self._mqtt(device_id, allow_probe_backoff=True)
+            system_state = await mqtt.async_get_system_state() if mqtt else {}
+        except CelebrightError as err:
+            _LOGGER.debug("schedule flag probe failed for %s: %s", device_id, err)
+            return
+        flag = _schedule_flag(system_state)
+        if flag is not None:
+            state.schedule_enabled = flag
+
+    # --- AppSync (GraphQL) status ---
+
+    async def _graphql_statuses(self, device_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """AppSync status items by device id; {} when unavailable (caller falls back)."""
+        if not device_ids or time.monotonic() < self._graphql_retry_at:
+            return {}
+        try:
+            body = await self._graphql(build_status_query(device_ids))
+            result = parse_status_response(device_ids, body)
+            if not result and body.get("errors"):
+                # 200 OK but every record null with errors (e.g. field-level auth): report it, not "no record".
+                raise CelebrightCommandError(_first_graphql_error(body))
+        except CelebrightError as err:
+            self._graphql_retry_at = time.monotonic() + _GRAPHQL_BACKOFF_SECONDS
+            log = _LOGGER.debug if self._graphql_failed_before else _LOGGER.warning
+            self._graphql_failed_before = True
+            log(
+                "AppSync status unavailable (%s) — using MQTT for state; retrying in %ds",
+                err, _GRAPHQL_BACKOFF_SECONDS,
+            )
+            return {}
+        if self._graphql_failed_before or not self._graphql_ok_logged:
+            _LOGGER.info(
+                "Celebright AppSync status active (authorized with the %s token)",
+                self._graphql_token_kind,
+            )
+            self._graphql_ok_logged = True
+        self._graphql_failed_before = False
+        return result
+
+    async def _graphql(self, query: str) -> dict[str, Any]:
+        """POST a query with the access token (the app's choice), falling back to the id token; remembers which works."""
+        assert self._auth
+        await self._auth.async_ensure_valid()
+        tokens = [("access", self._auth.access_token), ("id", self._auth.id_token)]
+        if self._graphql_token_kind == "id":
+            tokens.reverse()
+        last_auth_err: CelebrightAuthError | None = None
+        for kind, token in tokens:
+            try:
+                body = await self._graphql_request(query, token)
+            except CelebrightAuthError as err:
+                last_auth_err = err
+                continue
+            self._graphql_token_kind = kind
+            return body
+        assert last_auth_err is not None
+        raise last_auth_err
+
+    async def _graphql_request(self, query: str, token: str) -> dict[str, Any]:
+        assert self._session
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Authorization": token,
+        }
+        try:
+            async with asyncio.timeout(15):
+                resp = await self._session.post(
+                    APPSYNC_URL, json={"query": query, "variables": {}}, headers=headers
+                )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise CelebrightConnectionError(f"AppSync request failed: {err}") from err
+
+        if resp.status in (401, 403):
+            raise CelebrightAuthError(f"AppSync HTTP {resp.status}: {(await resp.text())[:200]}")
+        if resp.status >= 400:
+            raise CelebrightCommandError(f"AppSync HTTP {resp.status}: {(await resp.text())[:200]}")
+        body = await resp.json(content_type=None)
+        if not isinstance(body, dict):
+            raise CelebrightCommandError("AppSync returned an unexpected response")
+        data = body.get("data")
+        nothing_returned = not data or all(v is None for v in data.values())
+        if body.get("errors") and nothing_returned:
+            if _graphql_unauthorized(body):
+                raise CelebrightAuthError(_first_graphql_error(body))
+            raise CelebrightCommandError(_first_graphql_error(body))
+        return body
+
+    # --- MQTT client selection ---
+
+    async def _mqtt(
+        self, device_id: str, *, allow_probe_backoff: bool = False
+    ) -> CelebrightMQTT | None:
+        """MQTT client on the protocol this controller answers (probed once per device, cached).
+
+        If the probe gets no answer, commands use the default protocol and fail on the
+        missing reply; with allow_probe_backoff the poll gets None until the back-off ends.
+        """
+        assert self._auth
+        await self._auth.async_ensure_valid()
+        mqtt = _mqtt_for_device(device_id, self._auth)
+
+        protocol = self._protocols.get(device_id)
+        if protocol is None:
+            if allow_probe_backoff and time.monotonic() < self._probe_retry_at.get(device_id, 0.0):
+                return None
+            protocol = await mqtt.async_probe_protocol()
+            if protocol is None:
+                self._probe_retry_at[device_id] = time.monotonic() + _PROBE_BACKOFF_SECONDS
+                _LOGGER.debug("Celebright %s answered on no known MQTT protocol", device_id)
+                if allow_probe_backoff:
+                    return None
+                protocol = MQTT_DEFAULT_PROTOCOL
+            else:
+                self._protocols[device_id] = protocol
+                self._probe_retry_at.pop(device_id, None)
+                _LOGGER.info("Celebright %s speaks MQTT protocol %s", device_id, protocol)
+        return mqtt.with_protocol(protocol)
 
     async def async_load_scene(self, device_id: str, scene_uuid: str) -> None:
-        assert self._auth
-        await self._auth.async_ensure_valid()
-        mqtt = _mqtt_for_device(device_id, self._auth)
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
         await mqtt.async_load_scene(scene_uuid)
 
-    async def async_set_color(self, device_id: str, hex_color: str) -> None:
-        assert self._auth
-        await self._auth.async_ensure_valid()
-        mqtt = _mqtt_for_device(device_id, self._auth)
-        await mqtt.async_set_color(hex_color)
+    async def async_set_color(
+        self, device_id: str, hex_color: str, brightness: int | None = None
+    ) -> None:
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        await mqtt.async_set_color(hex_color, brightness)
+
+    async def async_set_brightness(
+        self, device_id: str, brightness: int, base_hex: str
+    ) -> None:
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        await mqtt.async_set_brightness(brightness, base_hex)
+
+    async def async_turn_off(self, device_id: str) -> None:
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        await mqtt.async_turn_off()
+
+    async def async_set_schedule_enabled(self, device_id: str, enabled: bool) -> None:
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        await mqtt.async_set_schedule_enabled(enabled)
+        self._schedule_enabled[device_id] = bool(enabled)
 
     async def async_resume_schedule(self, device_id: str) -> None:
-        assert self._auth
-        await self._auth.async_ensure_valid()
-        mqtt = _mqtt_for_device(device_id, self._auth)
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
         await mqtt.async_resume_schedule()
 
     async def async_create_event(
@@ -335,17 +627,27 @@ class CelebrightCloudAPI(CelebrightAPIBase):
         by_month: int | None = None,
         by_set_pos: int | None = None,
         event_uuid: str | None = None,
+        v3_event: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Build and publish a schedule event; returns the device ack.
+        """Create or update (with event_uuid) a schedule event.
 
-        Time fields use Celebright codes: -2=Sunset, -1=Sunrise, 0=Midnight,
-        or seconds-since-midnight. The md5 is computed to match the app exactly.
+        Legacy args use Celebright time codes (-2 sunset, -1 sunrise, 0 midnight, else
+        seconds) and the app's md5; v3 controllers use `v3_event` instead.
         """
         import uuid as _uuid
 
-        assert self._auth
-        await self._auth.async_ensure_valid()
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        if mqtt.protocol == "v3":
+            if v3_event is None:
+                raise CelebrightCommandError("This controller needs a v3 event specification")
+            return await self._save_event_v3(device_id, mqtt, v3_event, event_uuid)
 
+        if frequency == 0:
+            raise CelebrightCommandError(
+                "'Once' events need a controller on the newer protocol (v3). On this "
+                "controller use frequency 1 with a repeat_until date."
+            )
         ev_uuid = event_uuid or str(_uuid.uuid4())
         md5 = compute_event_md5(
             uuid=ev_uuid,
@@ -383,19 +685,70 @@ class CelebrightCloudAPI(CelebrightAPIBase):
             "byMonth": by_month,
             "bySetPos": by_set_pos,
         }
-        mqtt = _mqtt_for_device(device_id, self._auth)
         return await mqtt.async_save_event(event)
+
+    async def _save_event_v3(
+        self, device_id: str, mqtt: CelebrightMQTT, spec: dict[str, Any], event_uuid: str | None
+    ) -> dict[str, Any]:
+        """Create/update a v3 event and confirm it by reading it back."""
+        import uuid as _uuid
+
+        ev = events_v3.build_event(uuid=event_uuid or str(_uuid.uuid4()), **spec)
+        await mqtt.async_save_event(ev)  # raises on a failure ack / unreachable controller
+
+        def stored(found: dict[str, Any] | None, last_try: bool) -> bool:
+            if found is None:
+                return False
+            if found.get("md5") == ev["md5"]:
+                return True
+            # On the last look accept the same event stored with other normalisation.
+            return last_try and all(
+                found.get(k) == ev.get(k)
+                for k in ("event_name", "saved_scene_uuid", "recurrence_rule", "start_date")
+            )
+
+        if not await self._wait_for_event(device_id, ev["uuid"], stored):
+            raise CelebrightCommandError(
+                f"saveEvent was sent but event '{ev['event_name']}' ({ev['uuid']}) did not "
+                "appear in your account within 10 s — check the Celebright app before retrying"
+            )
+        return {"uuid": ev["uuid"], "name": ev["event_name"], "md5": ev["md5"], "verified": True}
 
     async def async_delete_event(self, device_id: str, event_uuid: str) -> dict[str, Any]:
         """Delete a schedule event by UUID. Returns the device ack."""
-        assert self._auth
-        await self._auth.async_ensure_valid()
-        mqtt = _mqtt_for_device(device_id, self._auth)
-        return await mqtt.async_delete_event(event_uuid)
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        ack = await mqtt.async_delete_event(event_uuid)
+        if mqtt.protocol != "v3":
+            return ack
+        if not await self._wait_for_event(device_id, event_uuid, lambda found, _last: found is None):
+            raise CelebrightCommandError(
+                f"deleteEvent was sent but event {event_uuid} is still in your account "
+                "after 10 s — check the Celebright app"
+            )
+        return {"uuid": event_uuid, "verified": True}
 
-    # ------------------------------------------------------------------
-    # HTTP helpers
-    # ------------------------------------------------------------------
+    async def async_set_event_enabled(
+        self, device_id: str, event_uuid: str, enabled: bool
+    ) -> dict[str, Any]:
+        """Enable or disable one schedule event (v3 controllers only)."""
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        await mqtt.async_set_event_enabled(event_uuid, enabled)
+        want = bool(enabled)
+        reflected = await self._wait_for_event(
+            device_id, event_uuid,
+            lambda found, _last: found is not None and bool(found.get("enabled", True)) == want,
+        )
+        if not reflected:
+            # Not fatal: no capture of this command exists to be sure it shows up promptly.
+            _LOGGER.warning(
+                "Event %s was sent as %s but the account doesn't show it yet",
+                event_uuid, "enabled" if want else "disabled",
+            )
+        return {"uuid": event_uuid, "enabled": want, "verified": reflected}
+
+    # --- HTTP helpers ---
 
     def _auth_headers(self) -> dict[str, str]:
         assert self._auth

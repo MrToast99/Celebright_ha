@@ -7,7 +7,9 @@ import importlib
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
+from .api import CelebrightAuthError, CelebrightConnectionError, CelebrightLoginError
 from .const import DOMAIN
 from .coordinator import CelebrightCoordinator
 from .services import async_register_services, async_unregister_services
@@ -18,31 +20,43 @@ PLATFORMS = [
     Platform.LIGHT,
     Platform.SELECT,
     Platform.SENSOR,
+    Platform.SWITCH,
 ]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = CelebrightCoordinator(hass, dict(entry.data))
-    await coordinator.async_setup()
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_setup()
+        await coordinator.async_config_entry_first_refresh()
 
-    entry.runtime_data = coordinator
+        entry.runtime_data = coordinator
 
-    # If this is the first entity of a given platform (e.g. "button") ever
-    # registered in this HA instance, importing homeassistant.components.<platform>
-    # does blocking file I/O. Pre-warm each one in the import executor so the
-    # import async_forward_entry_setups triggers below is a cheap sys.modules
-    # hit instead of a blocking call on the event loop.
-    await asyncio.gather(
-        *(
-            hass.async_add_import_executor_job(
-                importlib.import_module, f"homeassistant.components.{platform.value}"
+        # Pre-import the platform components in the executor: the first load of one
+        # (e.g. "button") does blocking file I/O that HA flags if it runs on the loop.
+        await asyncio.gather(
+            *(
+                hass.async_add_import_executor_job(
+                    importlib.import_module, f"homeassistant.components.{platform.value}"
+                )
+                for platform in PLATFORMS
             )
-            for platform in PLATFORMS
         )
-    )
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except CelebrightLoginError as err:
+        await coordinator.async_shutdown()
+        # Bad credentials: retrying can't help, so ask for a new password (reauth).
+        raise ConfigEntryAuthFailed(f"Celebright login failed: {err}") from err
+    except (CelebrightConnectionError, CelebrightAuthError) as err:
+        await coordinator.async_shutdown()
+        # Transient (network/AWS hiccup, or an API refusal): let HA retry with back-off.
+        raise ConfigEntryNotReady(f"Cannot reach Celebright: {err}") from err
+    except BaseException:
+        # Any other failure after connecting: don't leak the HTTP session.
+        await coordinator.async_shutdown()
+        raise
+
     entry.async_on_unload(coordinator.async_shutdown)
 
     async_register_services(hass)
@@ -51,7 +65,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    # If this is the last Celebright entry, tear down the shared services.
+    # Last entry: remove the shared services.
     if len(hass.config_entries.async_entries(DOMAIN)) <= 1:
         async_unregister_services(hass)
     return unloaded

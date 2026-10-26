@@ -1,0 +1,57 @@
+blueprint:
+  name: Celebright scene on a toggle
+  description: >
+    Shows a scene while a toggle (input_boolean) is on, and hands control back to the
+    schedule when it turns off.
+  domain: automation
+  author: MrToast99
+  source_url: https://github.com/MrToast99/Celebright_ha/blob/main/blueprints/automation/celebright/scene_toggle.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    toggle:
+      name: Toggle
+      description: An input_boolean helper.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    scene_select:
+      name: Scene selector
+      description: Your controller's scene dropdown.
+      selector:
+        entity:
+          filter:
+            - domain: select
+              integration: celebright
+    scene:
+      name: Scene
+      description: Scene name exactly as in the dropdown.
+      selector:
+        text:
+    off_option:
+      name: Resume-schedule option
+      description: The dropdown option that hands control back to the schedule.
+      default: "Off"
+      selector:
+        text:
+
+mode: single
+
+variables:
+  scene: !input scene
+  off_option: !input off_option
+
+triggers:
+  - trigger: state
+    entity_id: !input toggle
+    to:
+      - "on"
+      - "off"
+
+actions:
+  - action: select.select_option
+    target:
+      entity_id: !input scene_select
+    data:
+      option: "{{ scene if trigger.to_state.state == 'on' else off_option }}"

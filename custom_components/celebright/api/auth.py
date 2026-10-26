@@ -1,11 +1,5 @@
-"""AWS Cognito authentication for Celebright.
-
-Uses USER_PASSWORD_AUTH flow (simpler than SRP) — requires this flow to be
-enabled on the Celebright Cognito User Pool. If it's disabled, switch to
-USER_SRP_AUTH by using the `warrant` or `pycognito` library.
-
-Token refresh is handled automatically: when the 1-hour access token expires,
-the refresh token (valid for 30 days) is used to obtain new tokens.
+"""Cognito authentication: USER_SRP_AUTH login (the app client has USER_PASSWORD_AUTH
+disabled), token refresh, and temporary AWS credentials for IoT. The SRP maths is in srp.py.
 """
 from __future__ import annotations
 
@@ -16,7 +10,8 @@ from dataclasses import dataclass
 
 import aiohttp
 
-from .base import CelebrightAuthError, CelebrightConnectionError
+from .base import CelebrightAuthError, CelebrightConnectionError, CelebrightLoginError
+from .srp import SRPClient
 from ..const import (
     AWS_REGION,
     COGNITO_CLIENT_ID,
@@ -56,9 +51,7 @@ class CelebrightAuth:
         self._tokens: CognitoTokens | None = None
         self._credentials: AWSCredentials | None = None
 
-    # ------------------------------------------------------------------
-    # Public
-    # ------------------------------------------------------------------
+    # --- Public ---
 
     async def async_authenticate(self) -> None:
         """Full auth flow: Cognito login → identity credentials."""
@@ -90,29 +83,58 @@ class CelebrightAuth:
         return self._tokens.id_token
 
     @property
+    def access_token(self) -> str:
+        """Cognito access token — what the app sends to AppSync."""
+        assert self._tokens, "Not authenticated"
+        return self._tokens.access_token
+
+    @property
     def aws_credentials(self) -> AWSCredentials:
         assert self._credentials, "Not authenticated"
         return self._credentials
 
-    # ------------------------------------------------------------------
-    # Cognito login
-    # ------------------------------------------------------------------
+    # --- Cognito login ---
 
     async def _cognito_login(self) -> CognitoTokens:
-        payload = {
-            "AuthFlow": "USER_PASSWORD_AUTH",
-            "ClientId": COGNITO_CLIENT_ID,
-            "AuthParameters": {
-                "USERNAME": self._email,
-                "PASSWORD": self._password,
-            },
-        }
+        """USER_SRP_AUTH: InitiateAuth(SRP_A) → PASSWORD_VERIFIER → tokens."""
+        srp = SRPClient(COGNITO_USER_POOL_ID, self._email, self._password)
+        # 3072-bit maths is CPU-heavy: keep it off the event loop.
+        srp_a = await asyncio.to_thread(srp.get_srp_a)
+
         body = await self._cognito_idp_call(
-            "AWSCognitoIdentityProviderService.InitiateAuth", payload
+            "AWSCognitoIdentityProviderService.InitiateAuth",
+            {
+                "AuthFlow": "USER_SRP_AUTH",
+                "ClientId": COGNITO_CLIENT_ID,
+                "AuthParameters": {"USERNAME": self._email, "SRP_A": srp_a},
+            },
+        )
+        challenge = body.get("ChallengeName")
+        if challenge != "PASSWORD_VERIFIER":
+            raise CelebrightLoginError(
+                f"Unsupported Cognito login challenge: {challenge or 'none'}"
+            )
+
+        try:
+            responses = await asyncio.to_thread(
+                srp.process_challenge, body.get("ChallengeParameters", {})
+            )
+        except (KeyError, ValueError) as err:
+            raise CelebrightLoginError(f"Invalid SRP challenge from Cognito: {err!r}") from err
+
+        body = await self._cognito_idp_call(
+            "AWSCognitoIdentityProviderService.RespondToAuthChallenge",
+            {
+                "ChallengeName": "PASSWORD_VERIFIER",
+                "ClientId": COGNITO_CLIENT_ID,
+                "ChallengeResponses": responses,
+            },
         )
         result = body.get("AuthenticationResult", {})
         if not result.get("IdToken"):
-            raise CelebrightAuthError("USER_PASSWORD_AUTH not enabled on this pool; SRP flow required")
+            raise CelebrightLoginError(
+                f"Cognito requires an unsupported extra step: {body.get('ChallengeName') or 'none'}"
+            )
         return _parse_tokens(result)
 
     async def _cognito_refresh(self, refresh_token: str) -> CognitoTokens:
@@ -126,15 +148,13 @@ class CelebrightAuth:
         )
         result = body.get("AuthenticationResult", {})
         if not result.get("IdToken"):
-            raise CelebrightAuthError("Token refresh failed")
+            raise CelebrightLoginError("Token refresh failed")
         tokens = _parse_tokens(result)
         # Refresh flow does not return a new refresh token
         tokens.refresh_token = refresh_token
         return tokens
 
-    # ------------------------------------------------------------------
-    # Identity credentials exchange
-    # ------------------------------------------------------------------
+    # --- Identity credentials exchange ---
 
     async def _get_aws_credentials(self, tokens: CognitoTokens) -> AWSCredentials:
         login_key = f"cognito-idp.{AWS_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
@@ -172,9 +192,7 @@ class CelebrightAuth:
             identity_id=identity_id,
         )
 
-    # ------------------------------------------------------------------
-    # HTTP helpers
-    # ------------------------------------------------------------------
+    # --- HTTP helpers ---
 
     async def _cognito_idp_call(self, target: str, payload: dict) -> dict:
         return await self._amz_post(
@@ -210,8 +228,16 @@ class CelebrightAuth:
             body = await resp.json(content_type=None)
             code = body.get("__type", "")
             msg = body.get("message", str(body))
-            if "NotAuthorized" in code or "UserNotFound" in code:
-                raise CelebrightAuthError(msg)
+            if any(
+                c in code
+                for c in (
+                    "NotAuthorized",
+                    "UserNotFound",
+                    "PasswordResetRequired",
+                    "UserNotConfirmed",
+                )
+            ):
+                raise CelebrightLoginError(msg)
             raise CelebrightConnectionError(f"Cognito 400 {code}: {msg}")
         if resp.status != 200:
             text = await resp.text()

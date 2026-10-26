@@ -1,10 +1,8 @@
 # Celebright for Home Assistant
 
-A custom [Home Assistant](https://www.home-assistant.io/) integration for **Celebright** permanent / architectural LED lighting (CLC-series controllers).
+A custom [Home Assistant](https://www.home-assistant.io/) integration for **Celebright** permanent / architectural LED lighting (CLC-series controllers). Control your lights, activate saved scenes, manage the built-in schedule, and automate it all from Home Assistant.
 
-Control your lights, activate saved scenes, view your built-in lighting schedule, and drive everything from Home Assistant automations.
-
-> **Status:** early release (`0.2.0`). Cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
+> **Status:** `0.3.0`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
 
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/latest/total)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/total?label=downloads%40total)
@@ -14,189 +12,142 @@ Like the work? Help keep me Caffeinated!
 
 ---
 
+## Contents
+
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Installation](#installation)
+  - [HACS (custom repository)](#hacs-custom-repository)
+  - [Manual](#manual)
+- [Configuration](#configuration)
+- [Entities](#entities)
+- [Dashboard](#dashboard)
+  - [Optional cards (need HACS frontend cards)](#optional-cards-need-hacs-frontend-cards)
+- [Automations](#automations)
+- [The schedule](#the-schedule)
+  - [Create an event](#create-an-event)
+  - [Update, delete, enable/disable](#update-delete-enabledisable)
+- [Troubleshooting](#troubleshooting)
+- [Limitations](#limitations)
+- [Contributing](#contributing)
+- [Disclaimer](#disclaimer)
+
+---
+
 ## Features
 
 | Capability | Entity | Notes |
 |---|---|---|
-| On / off | `light.*` | "Off" resumes the controller's schedule |
-| Solid colour | `light.*` | RGB colour picker |
-| Brightness | `light.*` | 0–255, scales the active colour |
-| Scene selection | `select.*` | All saved scenes from your account + **Off** |
-| Current display | `sensor.*` | Live — shows the active scene or "Off" |
-| Schedule status | `binary_sensor.*` | On when the device schedule is enabled |
-| Schedule events | `sensor.*` | Count + full decoded event list in attributes |
-| Device info | `sensor.*` | Model, firmware, hardware rev, LED count (+ per‑string), bulb type, colour order, location |
+| On / off | `light.*` | |
+| Solid colour, brightness | `light.*` | RGB picker, 0–255 |
+| Scene selection | `select.*` | Your saved scenes, plus **Off** (resume the schedule) |
+| Current display, active event, next event | `sensor.*` | Live |
+| Schedule on/off | `switch.*`, `binary_sensor.*` | |
+| Schedule events | `sensor.*` | Count + decoded list; create / edit / delete / enable via services |
+| Device info | `sensor.*` | Model, firmware, hardware, LED count, bulb type, colour order, location |
 
-Plus a ready-to-use **3‑view dashboard** and **example automations**.
+Plus a generated **dashboard** and ready-made automation **blueprints**.
 
 ---
 
 ## How it works
 
-Celebright has no local API — control flows through their AWS cloud:
+Celebright has no local API; everything goes through its AWS cloud:
 
 ```
 Home Assistant
-   │
-   ├─ Auth ........ AWS Cognito (email + password) → ID token + temp AWS creds
-   │
-   ├─ State ....... REST poll to app-api.celebright.com  (every 30 s)
-   │                 • getUserData            → devices, scenes, schedule
-   │                 • getUserDeviceStatuses  → on/off, current display
-   │
-   └─ Control ..... AWS IoT MQTT over WebSocket (SigV4-signed)
-                     • setColor          {"color": "RRGGBB"}
-                     • loadSavedScene    {"savedSceneUuid": "..."}
-                     • setResumeSchedule {}
+  ├─ Login ...... AWS Cognito (SRP; your password is never sent) → tokens + temporary AWS credentials
+  ├─ Status ..... REST (devices, scenes, schedule) + AppSync GraphQL (live state), polled every 30 s
+  └─ Control .... AWS IoT MQTT over WebSocket
 ```
 
-Because it is cloud-based, the integration is `iot_class: cloud_polling` and requires an internet connection.
+Newer controllers (firmware 3.x) use a newer MQTT protocol ("v3"); older ones use "v2". The integration detects which one each controller speaks. It is `cloud_polling` and needs an internet connection.
 
 ---
 
 ## Requirements
 
 - Home Assistant **2024.1** or newer
-- A Celebright account (the same email/password you use in the Celebright app)
-- Your Celebright controller online and registered to that account
+- A Celebright account (the email and password you use in the Celebright app)
+- A controller that is online and registered to that account
 
 ---
 
 ## Installation
 
-### Option A — HACS (custom repository)
+### HACS (custom repository)
 
-1. In Home Assistant, open **HACS → Integrations**.
-2. Click the **⋮** menu (top right) → **Custom repositories**.
-3. Add the repository URL `https://github.com/MrToast99/Celebright_ha` with category **Integration**.
-4. Find **Celebright** in the list and click **Download**.
-5. **Restart Home Assistant.**
+1. **HACS → Integrations → ⋮ → Custom repositories**.
+2. Add `https://github.com/MrToast99/Celebright_ha` with category **Integration**.
+3. Find **Celebright**, click **Download**, then **restart Home Assistant**.
 
-### Option B — Manual
+### Manual
 
-1. Download or clone this repository.
-2. Copy the folder `custom_components/celebright` into your Home Assistant
-   config directory so the path is:
-   ```
-   <config>/custom_components/celebright/
-   ```
-   On a typical install `<config>` is `/config` (Home Assistant OS / Container)
-   or `~/.homeassistant` (Core).
-3. **Restart Home Assistant.**
-
-After restarting, the folder should look like:
-
-```
-<config>/custom_components/celebright/
-├── __init__.py
-├── manifest.json
-├── config_flow.py
-├── coordinator.py
-├── const.py
-├── entity.py
-├── light.py
-├── select.py
-├── sensor.py
-├── binary_sensor.py
-├── strings.json
-├── brand/                 (icon.png, logo.png, @2x variants)
-└── api/
-    ├── auth.py            (Cognito authentication)
-    ├── cloud.py           (REST polling + schedule decoding)
-    ├── mqtt.py            (AWS IoT MQTT control)
-    └── base.py            (shared data types)
-```
+Copy `custom_components/celebright` into your config folder (`<config>/custom_components/celebright/`; `<config>` is `/config` on Home Assistant OS / Container) and restart.
 
 ---
 
 ## Configuration
 
-1. Go to **Settings → Devices & Services → + Add Integration**.
-2. Search for **Celebright**.
-3. Enter the **email** and **password** for your Celebright account.
-4. Click **Submit**.
+1. **Settings → Devices & Services → + Add Integration → Celebright**.
+2. Enter your Celebright email and password.
 
-The integration validates the credentials against Cognito, then creates one
-Home Assistant **device** per Celebright controller on the account, each with
-its light, scene selector, schedule, and info entities.
-
-> Credentials are stored by Home Assistant in its encrypted config entry store.
-> They are sent only to Celebright/AWS endpoints, exactly as the official app does.
+One Home Assistant **device** is created per controller. Credentials are stored in Home Assistant's config entry store and sent only to Celebright/AWS endpoints, as the official app does. If the password later stops working, Home Assistant shows a **Re-authenticate** prompt.
 
 ---
 
 ## Entities
 
-For a controller named **House**, you get:
+For a controller named **House**:
 
-| Entity ID | Type | Purpose |
-|---|---|---|
-| `light.house` | light | On/off, RGB colour, brightness |
-| `select.house_scene` | select | Pick a saved scene, or **Off** |
-| `sensor.house_current_display` | sensor | Active scene / "Off" |
-| `binary_sensor.house_schedule` | binary_sensor | Schedule enabled? |
-| `sensor.house_scheduled_events` | sensor | Event count (+ list in attributes) |
-| `sensor.house_model` | sensor | e.g. `CLC-03` |
-| `sensor.house_firmware` | sensor | e.g. `2.05` |
-| `sensor.house_hardware_version` | sensor | e.g. `Rev 4` |
-| `sensor.house_led_count` | sensor | e.g. `125` (per-string counts in attributes) |
-| `sensor.house_bulb_type` | sensor | e.g. `SC24-GEN1` |
-| `sensor.house_color_order` | sensor | e.g. `RGBW (24V Natural White)` |
-| `sensor.house_location` | sensor | e.g. `Springfield, Illinois` |
-| `button.house_refresh_scenes` | button | Re-pull scenes/schedule from your account |
+| Entity ID | Purpose |
+|---|---|
+| `light.house` | On/off, RGB colour, brightness |
+| `select.house_scene` | Pick a saved scene, or **Off** (resume the schedule) |
+| `sensor.house_current_display` | Active scene, or "Off" |
+| `sensor.house_active_event` | Scheduled event playing now (`None` if none) |
+| `sensor.house_next_event_start` | When the next event starts (controller's local time) |
+| `sensor.house_active_source` | What drives the lights: `off`, `user_display`, … (diagnostic) |
+| `switch.house_schedule_enabled` | Turn the built-in schedule on / off (firmware 2.x only) |
+| `binary_sensor.house_schedule` | Schedule on: the controller's flag, or "has scheduled events" on newer firmware |
+| `sensor.house_scheduled_events` | Event count; the list is in the attributes |
+| `sensor.house_model`, `_firmware`, `_hardware_version`, `_led_count`, `_bulb_type`, `_color_order`, `_location` | Device info |
+| `button.house_refresh_scenes` | Re-pull scenes and schedule from your account |
 
-> Replace `house` with your device's slug if it is named differently. Find the
-> exact IDs under **Settings → Devices & Services → Entities**.
+Replace `house` with your device's slug if it is named differently (see **Settings → Devices & Services → Entities**).
 
 ---
 
-## Dashboard setup
+## Dashboard
 
-A complete dashboard is provided in [`celebright_dashboard.yaml`](celebright_dashboard.yaml).
+The integration generates a ready-made dashboard (built-in cards only) with **your** entity IDs and device name, so there is nothing to edit.
 
-1. In Home Assistant: **Settings → Dashboards → + Add Dashboard** → name it
-   "Celebright", choose **New dashboard from scratch**.
-2. Open it → **⋮ (top right) → Edit Dashboard → ⋮ → Raw configuration editor**.
-3. Delete the placeholder content, paste the entire contents of
-   `celebright_dashboard.yaml`, and **Save**.
+1. **Developer Tools → Actions → `Celebright: Generate dashboard`** → run. It writes `celebright_dashboard.yaml` to your config folder (`filename` changes the name; with several controllers pass `device_id`).
+2. Use it one of two ways:
+   - **YAML dashboard (recommended).** Add this to `configuration.yaml`, restart, and open **Celebright** in the sidebar:
 
-The dashboard has three views:
+     ```yaml
+     lovelace:
+       dashboards:
+         celebright:
+           mode: yaml
+           title: Celebright
+           icon: mdi:string-lights
+           show_in_sidebar: true
+           filename: celebright_dashboard.yaml
+     ```
 
-- **Lights** — status, device info, colour/brightness picker, and a scene dropdown.
-- **Schedule** — schedule on/off, a live table of every scheduled event (event, scene, when, time window), and a *Resume Schedule* button.
-- **Automations** — deep-link buttons to create/manage automations in HA's editor.
+   - **Storage dashboard.** **Settings → Dashboards → + Add Dashboard → New dashboard from scratch**, open it → **⋮ → Edit Dashboard → ⋮ → Raw configuration editor**, paste the file's contents, **Save**.
+3. After updating the integration, run the action again (a YAML dashboard shows the new file on refresh). Nothing to find-and-replace.
 
-The scene list, schedule table, and device info are all **read live from your
-account** — nothing is hard-coded, so the dashboard works as-is for any
-Celebright user. The default dashboard uses **only built-in cards** (no HACS
-required).
+Views: **Lights** (status, colour/brightness, scene dropdown), **Schedule** (next event, on/off, event table, resume button) and **Automations** (links to HA's editor). Scenes, schedule and device info are read live from your account.
 
-> **Entity names:** the YAML assumes the device slug `house` (`light.house`,
-> ### ⚠️ Replace the `house` slug with your own
->
-> The bundled dashboard and automations use entity IDs like `light.house` and
-> `select.house_scene`. **These are built from your controller's name** — they
-> read `house` only because the reference device is named "House". **If your
-> controller has any other name, those IDs don't exist for you** and cards show
-> *"Entity not found"*.
->
-> **Fix (once):** in the YAML, **Find & Replace `house` → your slug** (lowercase,
-> spaces → underscores, e.g. `Front Yard` → `front_yard`).
->
-> **Find your slug:** Settings → Devices & Services → **Entities**, search
-> `celebright` — the bit between the dot and `_scene` is your slug
-> (e.g. `select.front_yard_scene` → slug is `front_yard`). Renaming the device
-> later doesn't change the entity IDs, so this is a one-time edit.
+### Optional cards (need HACS frontend cards)
 
-### Optional dynamic cards (require HACS frontend cards)
+Not in the default dashboard. A card showing `Custom element doesn't exist` means that card isn't installed.
 
-These are **not** in the default dashboard (to keep it dependency-free). Add them
-only if you have the corresponding HACS card installed — otherwise a card showing
-`Custom element doesn't exist` means that card isn't installed.
-
-**One-tap scene buttons** — a button per scene, generated live from your account.
-Needs [`config-template-card`](https://github.com/iantrich/config-template-card).
-Add to the **Lights** view:
+**One-tap scene buttons** ([`config-template-card`](https://github.com/iantrich/config-template-card)), added to the Lights view (replace `house` with your device's slug: **Settings → Devices & Services → Entities**, the part before `_scene`):
 
 ```yaml
 - type: custom:config-template-card
@@ -218,11 +169,7 @@ Add to the **Lights** view:
          })) }
 ```
 
-**Live list of your Celebright automations** — auto-lists every automation whose
-entity ID starts with `automation.celebright_` (all the bundled examples do, since
-their aliases begin with "Celebright"). Needs
-[`auto-entities`](https://github.com/thomasloven/lovelace-auto-entities). Add to
-the **Automations** view:
+**Live list of your Celebright automations** ([`auto-entities`](https://github.com/thomasloven/lovelace-auto-entities)), added to the Automations view. It lists every `automation.celebright_*`; an automation's entity ID follows its alias, which is why the default view links to the editor instead.
 
 ```yaml
 - type: custom:auto-entities
@@ -236,139 +183,65 @@ the **Automations** view:
   show_empty: false
 ```
 
-> **Why not hard-code automation entities?** An automation's `entity_id` is
-> derived from its **alias** (e.g. alias "Celebright Halloween in October" →
-> `automation.celebright_halloween_in_october`), not from its `id`. Renaming an
-> automation changes its entity ID, so a hard-coded list goes stale — which is
-> why the default Automations view links to the editor instead.
-
 ---
 
 ## Automations
 
-Examples are in [`celebright_automations.yaml`](celebright_automations.yaml):
+Automations come as **blueprints**: you pick your controller and type scene names in a form, with nothing to edit (needs Home Assistant 2024.10+). Click **Import**, then **Settings → Automations & Scenes → Blueprints →** the blueprint **→ Create automation**. Re-import a blueprint to get updates.
 
-| Automation | What it does |
-|---|---|
-| Scene at sunset | A holiday scene at sunset during December |
-| Lights off late night | Resumes schedule at 11:30 PM |
-| Halloween in October | A scene at sunset, second half of October |
-| Party toggle | Flips to a scene from an `input_boolean` helper |
-| Offline notify | Notifies if the controller goes unavailable |
-| Holiday week (dusk→dawn) | Shows a scene every night of the Mon–Sun week containing a date (e.g. July 1), every year |
+| Blueprint | What it does | |
+|---|---|---|
+| **Holiday lighting controller** | One automation for New Year fireworks, an optional aurora alert, December and week-long holidays (St. Patrick's, Canada Day, Canadian Thanksgiving, Remembrance Day, Easter Monday, Truth and Reconciliation). Leave a holiday's scene blank to skip it. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fholiday_lighting_controller.yaml) |
+| **Scene at sunset during a date range** | A scene every night from sunset inside a yearly date range (may cross New Year); resumes the schedule at sunrise. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_in_date_range.yaml) |
+| **Scene for a holiday week** | A scene dusk to dawn for the Monday-Sunday week containing a date, every year. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_for_holiday_week.yaml) |
+| **Scene on a toggle** | A scene while an `input_boolean` is on; resumes the schedule when it turns off. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_toggle.yaml) |
+| **Resume the schedule at a time** | Hands control back to the schedule at a set time each day. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fresume_schedule_at_time.yaml) |
+| **Controller offline notification** | Runs an action (a notification by default) when the controller has been unavailable for a while. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fcontroller_offline_notify.yaml) |
 
-> The scene names in the file are **placeholders** (`REPLACE WITH YOUR SCENE
-> NAME`) — set them to your own saved scenes (the names in the scene dropdown).
-
-There are two ways to add them, and they need **different formats**:
-
-### Option A — File include (use the file as-is)
-
-`celebright_automations.yaml` is a YAML **list**, which is exactly what an
-`!include` expects.
-
-**1. Put the file in your config directory** — the same folder as
-`configuration.yaml` (this is `/config/` on Home Assistant OS / Container, or
-`~/.homeassistant/` on Core). The result must be:
-
-```
-/config/configuration.yaml
-/config/celebright_automations.yaml      ← right next to it, NOT in a subfolder
-```
-
-> The filename must be **exactly** `celebright_automations.yaml` — all lowercase,
-> ending in `.yaml` with **no** hidden `.txt` (Windows often adds one). The path
-> in the `!include` is relative to `configuration.yaml`, so the file has to sit
-> beside it. The easiest way to avoid copy/encoding problems is to create the
-> file directly with the **File editor** add-on (📄+ icon) and paste the contents
-> in.
-
-**2. Add the include to `configuration.yaml`** (at the far left, column 0). If you
-already have an `automation:` line, add this on the next line — the word after
-`automation` is just a unique label:
-
-```yaml
-automation: !include automations.yaml            # may already exist
-automation celebright: !include celebright_automations.yaml
-```
-
-**3. Apply it:** Developer Tools → YAML → **Check Configuration** (must pass),
-then **Reload Automations**.
-
-> Getting `Unable to read file /config/celebright_automations.yaml`? The file
-> isn't where the include expects it — re-check step 1 (wrong folder, a hidden
-> `.txt`, or a capitalised name).
-
-### Option B — Paste a single automation in the UI
-
-> ⚠️ **Do not paste the whole file** into the automation editor — it's a list,
-> and you'll get `Message malformed: extra keys not allowed @ data['0']`.
-
-Settings → Automations → **Create automation → ⋮ → Edit in YAML**, then paste a
-**single** automation as a plain mapping — **no leading `-`, no `id:` line**:
-
-```yaml
-alias: Celebright scene at sunset
-description: ""
-triggers:
-  - trigger: sun
-    event: sunset
-conditions:
-  - condition: template
-    value_template: "{{ now().month == 12 }}"
-actions:
-  - action: select.select_option
-    target:
-      entity_id: select.house_scene
-    data:
-      option: "REPLACE WITH YOUR SCENE NAME"
-mode: single
-```
+- Type scene names exactly as they appear in the scene dropdown.
+- The *resume-schedule option* defaults to `Off`, the dropdown entry that hands control back to the schedule.
+- Use the holiday controller **instead of** the date-range / holiday-week blueprints for the same lights; they would compete.
+- No import button? Paste the blueprint's GitHub URL into **Blueprints → Import Blueprint**. The files are in [`blueprints/automation/celebright`](blueprints/automation/celebright).
 
 ---
 
 ## The schedule
 
-Your Celebright schedule runs on the controller itself. This integration
-**reads** it for display *and* can **create** new scheduled events.
+The schedule runs on the controller itself. The integration shows it and can **create, edit, delete and enable/disable** events.
 
-- Time codes are decoded for readability: `Sunset`, `Sunrise`, `Midnight`, or `HH:MM`.
-- Recurrence is shown in plain English: *"Every December 31"*, *"1st Sunday of November"*, *"Oct 27 – Oct 28 (seasonal)"*.
-- Selecting a scene in HA temporarily **overrides** the schedule; **Off / Resume Schedule** hands control back to it.
+- Times read as `Sunset`, `Sunrise` (with an offset like `Sunset +30 min` on newer controllers), `Midnight` or `HH:MM`; recurrence reads as *"Every December 31"* or *"1st Sunday of November"*.
+- Selecting a scene overrides the schedule; **Off** resumes it.
+- Features marked **v3** need a newer (firmware 3.x) controller: event offsets, per-event enable/disable, and "once" events.
 
-### Creating events — `celebright.create_event` service
-
-Add a scheduled event from Home Assistant (Developer Tools → Actions, or an automation):
+### Create an event
 
 ```yaml
 action: celebright.create_event
 data:
   name: Christmas
-  scene: "Candy Cane"        # a saved scene name (or its UUID)
+  scene: "Candy Cane"          # a saved scene name or UUID
   start_date: "2026-12-01"
   end_date: "2026-12-02"
-  start_time: sunset          # sunset | sunrise | midnight | HH:MM
+  start_time: sunset            # sunset | sunrise | midnight | HH:MM
   end_time: sunrise
-  priority: 3                 # 1–4, higher wins on overlap
-  frequency: 1                # 1 = one-time/seasonal, 4 = yearly
-  repeat_until: "2026-12-30"  # optional seasonal window end
+  priority: 3                   # 1–4, higher wins on overlap
+  repeat_until: "2026-12-30"    # repeat daily until this date
+  # frequency: 1                # 0 = once (v3), 1 = daily (until repeat_until or forever), 4 = yearly
+  # start_offset_minutes: 30    # v3: shift a sunset/sunrise time
+  # enabled: false              # v3: create it switched off
 ```
 
-For a **yearly event on a fixed date** add `by_month` + `by_month_day`
-(e.g. December 31). For a **yearly nth-weekday** event (e.g. 1st Sunday of
-November) add `by_month`, `by_day: SU`, and `by_set_pos: 1`.
+- **Frequency:** if omitted, you get a once-only event on v3, or daily until `repeat_until` when that is set. Older controllers repeat daily (until `repeat_until`, or forever).
+- **Yearly:** a fixed date needs `by_month` + `by_month_day`; an nth weekday (e.g. 1st Sunday of November) needs `by_month`, `by_day: SU`, `by_set_pos: 1`.
+- **Time zone:** dates and times use **Home Assistant's** time zone; keep it the same as the controller's.
+- The event appears in the Celebright app as if created there (same content hash).
 
-The event appears in the Celebright app and on the controller exactly as if you
-had created it there — the integration computes the same content hash the app
-uses, so it syncs cleanly.
-
-### Updating and deleting events
+### Update, delete, enable/disable
 
 ```yaml
-# Update an existing event in place (identify by event_name or event_uuid)
-action: celebright.update_event
+action: celebright.update_event     # keeps the enabled state unless you pass `enabled`
 data:
-  event_name: "Christmas"        # or: event_uuid: "<uuid>"
+  event_name: "Christmas"           # or event_uuid: "<uuid>"
   name: "Christmas"
   scene: "Candy Cane"
   start_date: "2026-12-01"
@@ -378,14 +251,19 @@ data:
 ```
 
 ```yaml
-# Delete an event
 action: celebright.delete_event
 data:
-  event_name: "Christmas"        # or: event_uuid: "<uuid>"
+  event_name: "Christmas"           # or event_uuid: "<uuid>"
 ```
 
-Event UUIDs are listed in the **`sensor.<device>_scheduled_events`** attributes
-if you prefer to target them precisely.
+```yaml
+action: celebright.set_event_enabled   # v3
+data:
+  event_name: "Christmas"
+  enabled: false
+```
+
+Event UUIDs are in the `sensor.<device>_scheduled_events` attributes. On v3 each service confirms the result by reading the event back from your account, so a change that didn't take effect is reported as an error.
 
 ---
 
@@ -393,13 +271,14 @@ if you prefer to target them precisely.
 
 | Symptom | Fix |
 |---|---|
-| **Invalid authentication** during setup | Re-check email/password in the Celebright app. The account must already exist. |
-| Entities show **Unavailable** | Controller is offline, or the cloud is unreachable. Check the device in the Celebright app. |
-| Dashboard shows **"Entity not found"** | Your device slug isn't `house`. Check **Settings → Entities** and update the entity IDs in the YAML. |
-| Turn-on / scene change fails with **403** | A transient AWS credential/clock issue; it should refresh on the next attempt. Open an issue if it persists. |
-| Automations view lists missing automations | Import `celebright_automations.yaml`, or edit the list in the dashboard YAML. |
+| **Invalid authentication** | Re-check the email/password in the Celebright app. |
+| **Re-authenticate** prompt | Your password changed; enter the new one. |
+| Entities **Unavailable** | The controller is offline or the cloud is unreachable; check it in the Celebright app. |
+| **"Entity not found"** on the dashboard | Re-run **Generate dashboard**. |
+| Commands do nothing | Enable debug logging (below); the log names the failing command. A *"not acknowledged"* warning means the controller is online but didn't confirm it. |
+| **403** on a command | A transient AWS credential/clock issue; it retries. Open an issue if it persists. |
 
-To get detailed logs, add to `configuration.yaml`:
+Debug logging:
 
 ```yaml
 logger:
@@ -412,25 +291,19 @@ logger:
 
 ## Limitations
 
-- **Cloud-only** — requires internet; there is no local control path.
-- **Schedule:** events can be **created, updated, and deleted** from HA. Toggling the whole schedule on/off isn't wired up yet.
-- **Solid colour** uses the `setColor` command; advanced per-bulb patterns are activated via **saved scenes**, not built ad-hoc from HA.
-- Unofficial: this integration is **not affiliated with or endorsed by Celebright** and was built by inspecting the app's own network traffic. The cloud API may change without notice.
+- **Cloud-only**: there is no local control path.
+- **Newer (v3) controllers:** no schedule switch (the firmware has no such command; switch individual events with `celebright.set_event_enabled`), and scene create/delete isn't supported yet.
+- **Patterns:** advanced per-bulb patterns are started from **saved scenes**, not built from HA.
+- **Unofficial:** not affiliated with or endorsed by Celebright; built from the app's own network traffic, so the cloud API may change without notice.
 
 ---
 
 ## Contributing
 
-Issues and pull requests are welcome at
-<https://github.com/MrToast99/Celebright_ha>.
-
-If you hit a feature the app supports but this integration doesn't (e.g. editing
-schedules, custom patterns), a HAR capture of the action from the
-Celebright web app is the fastest way to add it.
+Issues and pull requests are welcome at <https://github.com/MrToast99/Celebright_ha>. If the app does something this integration doesn't, a HAR capture of that action is the fastest way to add it (it holds live tokens, so share it privately).
 
 ---
 
 ## Disclaimer
 
-This is a community project provided **as-is**, with no warranty. Use at your
-own risk. "Celebright" and related marks belong to their respective owners.
+A community project provided **as-is**, with no warranty. "Celebright" and related marks belong to their owners.

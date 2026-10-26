@@ -40,6 +40,17 @@ class CelebrightScheduleBinarySensor(CelebrightEntity, BinarySensorEntity):
         return "Schedule"
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         state = self._device_state
-        return bool(state and state.schedule_enabled)
+        if state is None:
+            return None
+        if state.schedule_enabled is not None:
+            return state.schedule_enabled
+        # v3 reports no schedule flag: fall back to "has scheduled events".
+        info = self.coordinator.device_infos.get(self._device_id)
+        return bool(info.events) if info else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int] | None:
+        info = self.coordinator.device_infos.get(self._device_id)
+        return {"scheduled_events": len(info.events)} if info else None
