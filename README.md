@@ -125,12 +125,12 @@ The integration generates a ready-made dashboard (built-in cards only) with **yo
 
 1. **Developer Tools → Actions → `Celebright: Generate dashboard`** → run. It writes `celebright_dashboard.yaml` to your config folder (`filename` changes the name; with several controllers pass `device_id`).
 2. Use it one of two ways:
-   - **YAML dashboard (recommended).** Add this to `configuration.yaml`, restart, and open **Celebright** in the sidebar:
+   - **YAML dashboard (recommended).** Add this to `configuration.yaml`, restart, and open **Celebright** in the sidebar (the key needs a hyphen, e.g. `celebright-lights`):
 
      ```yaml
      lovelace:
        dashboards:
-         celebright:
+         celebright-lights:
            mode: yaml
            title: Celebright
            icon: mdi:string-lights

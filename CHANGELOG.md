@@ -50,6 +50,7 @@ Existing dashboards and automations keep working: entity IDs, the saved login an
 - **Lights couldn't be turned on, with nothing logged:** firmware 3.x uses `v3` MQTT topics and silently ignores `v2`. The protocol is now detected per controller (v3, then v2), so old and new firmware both work.
 - **v3 commands no longer fail silently:** the integration waits for the controller's reply and raises "the controller did not respond…" otherwise. `setColor` sends the `source` field, and v3 `systemState` is parsed for colour and brightness.
 - **Service schema rejected GUI input:** the `frequency` selector submits strings; `frequency`, `priority` and the `by_*` fields now coerce to int.
+- **hassfest:** removed `aiohttp` from the manifest `requirements`; it ships with Home Assistant itself.
 - **Integration failed to load:** `button.py` imported a non-existent `ButtonEntityClass` (now `ButtonDeviceClass`).
 - **Light colour/brightness were never reported:** MQTT state is now read for powered-on devices, and a slow device no longer fails the poll.
 - **Scene dropdown ignored the device's real scene:** the device-reported scene now wins over the local selection.
