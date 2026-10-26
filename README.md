@@ -105,7 +105,7 @@ For a controller named **House**:
 |---|---|
 | `light.house` | On/off, RGB colour, brightness |
 | `select.house_scene` | Pick a saved scene, or **Off** (resume the schedule) |
-| `scene.house_<scene name>` | One per saved scene: activate it from automations, scripts, dashboards or voice. Appears and disappears as you add and delete scenes in the app |
+| `scene.house_<scene name>` | One per saved scene: activate it from automations, scripts, dashboards or voice. Listed on a separate "Scenes" sub-device, not the main device page. Appears and disappears as you add and delete scenes in the app |
 | `sensor.house_current_display` | Active scene, or "Off" |
 | `sensor.house_active_event` | Scheduled event playing now (`None` if none) |
 | `sensor.house_next_event_start` | When the next event starts (controller's local time) |

@@ -10,7 +10,7 @@ All notable changes are documented here. The format follows
 Update in HACS and restart. Automations made from the Celebright blueprints need re-creating: their inputs changed (see below). Import the blueprints again, create the automation, and delete the old one. Nothing else changes; the new scene entities appear on their own.
 
 ### Added
-- **Scene entities:** every saved scene gets a `scene.*` entity (activate it from automations, scripts, dashboards or voice). They follow the scenes in your account: new ones appear and deleted ones go on the next refresh.
+- **Scene entities:** every saved scene gets a `scene.*` entity (activate it from automations, scripts, dashboards or voice). They follow the scenes in your account: new ones appear and deleted ones go on the next refresh. They sit on a "<device> Scenes" sub-device, so the controller's page shows one *Connected device* link instead of a long list; they are named after the controller (e.g. `scene.house_candy_cane`).
 
 ### Changed
 - **Blueprints pick scenes from dropdowns** (the scene entities) instead of asking you to type scene names. The *Resume-schedule option* input is gone; resuming always uses the scene dropdown's **Off**.
