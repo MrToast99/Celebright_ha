@@ -4,7 +4,7 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
-## [0.3.1] - Pending
+## [0.3.1] - 2026-10-26
 
 ### Upgrading from 0.3.0
 Update in HACS and restart. Automations made from the Celebright blueprints need re-creating: their inputs changed (see below). Import the blueprints again, create the automation, and delete the old one. Nothing else changes; the new scene entities appear on their own.
