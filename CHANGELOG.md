@@ -4,6 +4,15 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - pending
+
+### Upgrading from 0.3.1
+Update in HACS and restart. Nothing needs re-creating: existing holiday automations keep working, and the new inputs use their defaults until you set them (edit the automation to use them).
+
+### Added
+- **Holiday controller:** built-in **Halloween** (Oct 25–31), four **custom holidays** (a scene plus any start and end date, may cross New Year), and optional **timing adjustments** (up to 14 extra days before or after each week-long holiday, and Halloween's first and last day).
+- **`celebright_automations.yaml` is back**, with its manual guide in the README (include it, or paste one automation), for those who prefer plain YAML to blueprints.
+
 ## [0.3.1] - 2026-10-26
 
 ### Upgrading from 0.3.0

@@ -3,8 +3,9 @@ blueprint:
   description: >
     One automation for all scheduled lighting. Every trigger re-evaluates the date and
     time and applies the highest-priority matching scene: New Year fireworks, an aurora
-    alert, December, then the week-long holidays. Otherwise, and in daylight, the
-    controller's own schedule takes over. Leave a scene blank to skip that holiday.
+    alert, up to four custom holidays of your own, Halloween, December, then the week-long
+    holidays. Otherwise, and in daylight, the controller's own schedule takes over. Leave a
+    scene empty to skip that holiday. Holidays apply by calendar date (a night ends at midnight).
   domain: automation
   author: MrToast99
   source_url: https://github.com/MrToast99/Celebright_ha/blob/main/blueprints/automation/celebright/holiday_lighting_controller.yaml
@@ -99,6 +100,14 @@ blueprint:
               filter:
                 - domain: scene
                   integration: celebright
+        halloween_scene:
+          name: Halloween (Oct 25–31)
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
         remembrance_scene:
           name: Remembrance Day week (Nov 11)
           default: ""
@@ -123,6 +132,311 @@ blueprint:
               filter:
                 - domain: scene
                   integration: celebright
+    timing:
+      name: Adjust holiday timing
+      icon: mdi:calendar-clock
+      collapsed: true
+      description: >
+        Optional. A week-long holiday runs Monday to Sunday around its date; extend it by whole
+        days before or after that week. To shorten a holiday or move it elsewhere, leave its
+        scene empty and use a custom holiday instead.
+      input:
+        st_patricks_before:
+          name: St. Patrick's Day, extra days before
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        st_patricks_after:
+          name: St. Patrick's Day, extra days after
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        canada_day_before:
+          name: Canada Day, extra days before
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        canada_day_after:
+          name: Canada Day, extra days after
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        thanksgiving_before:
+          name: Canadian Thanksgiving, extra days before
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        thanksgiving_after:
+          name: Canadian Thanksgiving, extra days after
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        remembrance_before:
+          name: Remembrance Day, extra days before
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        remembrance_after:
+          name: Remembrance Day, extra days after
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        easter_before:
+          name: Easter Monday, extra days before
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        easter_after:
+          name: Easter Monday, extra days after
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        truth_reconciliation_before:
+          name: Truth and Reconciliation, extra days before
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        truth_reconciliation_after:
+          name: Truth and Reconciliation, extra days after
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 14
+              mode: box
+        halloween_start_day:
+          name: Halloween, first day (October)
+          default: 25
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+        halloween_end_day:
+          name: Halloween, last day (October)
+          default: 31
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+    custom_1:
+      name: Custom holiday 1
+      icon: mdi:calendar-plus
+      collapsed: true
+      description: Your own holiday, every year. The dates are inclusive and may cross New Year (e.g. Dec 20 to Jan 5).
+      input:
+        custom_1_scene:
+          name: Scene
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
+        custom_1_start_month:
+          name: Start month
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 12
+              mode: box
+        custom_1_start_day:
+          name: Start day
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+        custom_1_end_month:
+          name: End month
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 12
+              mode: box
+        custom_1_end_day:
+          name: End day
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+    custom_2:
+      name: Custom holiday 2
+      icon: mdi:calendar-plus
+      collapsed: true
+      description: Your own holiday, every year. The dates are inclusive and may cross New Year (e.g. Dec 20 to Jan 5).
+      input:
+        custom_2_scene:
+          name: Scene
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
+        custom_2_start_month:
+          name: Start month
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 12
+              mode: box
+        custom_2_start_day:
+          name: Start day
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+        custom_2_end_month:
+          name: End month
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 12
+              mode: box
+        custom_2_end_day:
+          name: End day
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+    custom_3:
+      name: Custom holiday 3
+      icon: mdi:calendar-plus
+      collapsed: true
+      description: Your own holiday, every year. The dates are inclusive and may cross New Year (e.g. Dec 20 to Jan 5).
+      input:
+        custom_3_scene:
+          name: Scene
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
+        custom_3_start_month:
+          name: Start month
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 12
+              mode: box
+        custom_3_start_day:
+          name: Start day
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+        custom_3_end_month:
+          name: End month
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 12
+              mode: box
+        custom_3_end_day:
+          name: End day
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+    custom_4:
+      name: Custom holiday 4
+      icon: mdi:calendar-plus
+      collapsed: true
+      description: Your own holiday, every year. The dates are inclusive and may cross New Year (e.g. Dec 20 to Jan 5).
+      input:
+        custom_4_scene:
+          name: Scene
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: scene
+                  integration: celebright
+        custom_4_start_month:
+          name: Start month
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 12
+              mode: box
+        custom_4_start_day:
+          name: Start day
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
+        custom_4_end_month:
+          name: End month
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 12
+              mode: box
+        custom_4_end_day:
+          name: End day
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              mode: box
 
 mode: restart
 
@@ -142,18 +456,72 @@ variables:
   thanksgiving_scene: !input thanksgiving_scene
   remembrance_scene: !input remembrance_scene
   easter_scene: !input easter_scene
+  halloween_scene: !input halloween_scene
   truth_reconciliation_scene: !input truth_reconciliation_scene
-  # A week-long holiday applies on every day of the Mon-Sun week containing its date.
-  in_st_patricks: "{{ now().isocalendar()[1] == now().replace(month=3, day=17).isocalendar()[1] }}"
-  in_canada_day: "{{ now().isocalendar()[1] == now().replace(month=7, day=1).isocalendar()[1] }}"
-  in_remembrance: "{{ now().isocalendar()[1] == now().replace(month=11, day=11).isocalendar()[1] }}"
-  in_truth_reconciliation: "{{ now().isocalendar()[1] == now().replace(month=9, day=30).isocalendar()[1] }}"
+  st_patricks_before: !input st_patricks_before
+  st_patricks_after: !input st_patricks_after
+  canada_day_before: !input canada_day_before
+  canada_day_after: !input canada_day_after
+  thanksgiving_before: !input thanksgiving_before
+  thanksgiving_after: !input thanksgiving_after
+  remembrance_before: !input remembrance_before
+  remembrance_after: !input remembrance_after
+  easter_before: !input easter_before
+  easter_after: !input easter_after
+  truth_reconciliation_before: !input truth_reconciliation_before
+  truth_reconciliation_after: !input truth_reconciliation_after
+  halloween_start_day: !input halloween_start_day
+  halloween_end_day: !input halloween_end_day
+  custom_1_scene: !input custom_1_scene
+  custom_1_start_month: !input custom_1_start_month
+  custom_1_start_day: !input custom_1_start_day
+  custom_1_end_month: !input custom_1_end_month
+  custom_1_end_day: !input custom_1_end_day
+  custom_2_scene: !input custom_2_scene
+  custom_2_start_month: !input custom_2_start_month
+  custom_2_start_day: !input custom_2_start_day
+  custom_2_end_month: !input custom_2_end_month
+  custom_2_end_day: !input custom_2_end_day
+  custom_3_scene: !input custom_3_scene
+  custom_3_start_month: !input custom_3_start_month
+  custom_3_start_day: !input custom_3_start_day
+  custom_3_end_month: !input custom_3_end_month
+  custom_3_end_day: !input custom_3_end_day
+  custom_4_scene: !input custom_4_scene
+  custom_4_start_month: !input custom_4_start_month
+  custom_4_start_day: !input custom_4_start_day
+  custom_4_end_month: !input custom_4_end_month
+  custom_4_end_day: !input custom_4_end_day
+  # A week-long holiday applies on every day of the Mon-Sun week containing its date,
+  # widened by the optional extra days before/after.
+  in_st_patricks: >-
+    {%- set a = now().replace(month=3, day=17) -%}
+    {%- set ws = a - timedelta(days=a.weekday() + st_patricks_before | int) -%}
+    {%- set we = a + timedelta(days=6 - a.weekday() + st_patricks_after | int) -%}
+    {{ ws.date() <= now().date() <= we.date() }}
+  in_canada_day: >-
+    {%- set a = now().replace(month=7, day=1) -%}
+    {%- set ws = a - timedelta(days=a.weekday() + canada_day_before | int) -%}
+    {%- set we = a + timedelta(days=6 - a.weekday() + canada_day_after | int) -%}
+    {{ ws.date() <= now().date() <= we.date() }}
+  in_remembrance: >-
+    {%- set a = now().replace(month=11, day=11) -%}
+    {%- set ws = a - timedelta(days=a.weekday() + remembrance_before | int) -%}
+    {%- set we = a + timedelta(days=6 - a.weekday() + remembrance_after | int) -%}
+    {{ ws.date() <= now().date() <= we.date() }}
+  in_truth_reconciliation: >-
+    {%- set a = now().replace(month=9, day=30) -%}
+    {%- set ws = a - timedelta(days=a.weekday() + truth_reconciliation_before | int) -%}
+    {%- set we = a + timedelta(days=6 - a.weekday() + truth_reconciliation_after | int) -%}
+    {{ ws.date() <= now().date() <= we.date() }}
   # Canadian Thanksgiving: 2nd Monday of October.
   in_thanksgiving: >-
     {%- set oct1 = now().replace(month=10, day=1) -%}
     {%- set first_mon = 1 + (7 - oct1.weekday()) % 7 -%}
-    {%- set thanks = now().replace(month=10, day=first_mon + 7) -%}
-    {{ now().isocalendar()[1] == thanks.isocalendar()[1] }}
+    {%- set a = now().replace(month=10, day=first_mon + 7) -%}
+    {%- set ws = a - timedelta(days=a.weekday() + thanksgiving_before | int) -%}
+    {%- set we = a + timedelta(days=6 - a.weekday() + thanksgiving_after | int) -%}
+    {{ ws.date() <= now().date() <= we.date() }}
   # Easter Monday (Gregorian computus, +1 day).
   in_easter: >-
     {%- set y = now().year -%}
@@ -172,7 +540,31 @@ variables:
     {%- set mon = (h + l - 7*m + 114) // 31 -%}
     {%- set day = ((h + l - 7*m + 114) % 31) + 1 -%}
     {%- set emonday = now().replace(month=mon, day=day, hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1) -%}
-    {{ now().isocalendar()[1] == emonday.isocalendar()[1] }}
+    {%- set ws = emonday - timedelta(days=emonday.weekday() + easter_before | int) -%}
+    {%- set we = emonday + timedelta(days=6 - emonday.weekday() + easter_after | int) -%}
+    {{ ws.date() <= now().date() <= we.date() }}
+  in_halloween: "{{ now().month == 10 and halloween_start_day | int <= now().day <= halloween_end_day | int }}"
+  # Custom holidays: an inclusive date range that may cross New Year.
+  in_custom_1: >-
+    {%- set md = now().month * 100 + now().day -%}
+    {%- set s = custom_1_start_month | int * 100 + custom_1_start_day | int -%}
+    {%- set e = custom_1_end_month | int * 100 + custom_1_end_day | int -%}
+    {{ (s <= md <= e) if s <= e else (md >= s or md <= e) }}
+  in_custom_2: >-
+    {%- set md = now().month * 100 + now().day -%}
+    {%- set s = custom_2_start_month | int * 100 + custom_2_start_day | int -%}
+    {%- set e = custom_2_end_month | int * 100 + custom_2_end_day | int -%}
+    {{ (s <= md <= e) if s <= e else (md >= s or md <= e) }}
+  in_custom_3: >-
+    {%- set md = now().month * 100 + now().day -%}
+    {%- set s = custom_3_start_month | int * 100 + custom_3_start_day | int -%}
+    {%- set e = custom_3_end_month | int * 100 + custom_3_end_day | int -%}
+    {{ (s <= md <= e) if s <= e else (md >= s or md <= e) }}
+  in_custom_4: >-
+    {%- set md = now().month * 100 + now().day -%}
+    {%- set s = custom_4_start_month | int * 100 + custom_4_start_day | int -%}
+    {%- set e = custom_4_end_month | int * 100 + custom_4_end_day | int -%}
+    {{ (s <= md <= e) if s <= e else (md >= s or md <= e) }}
   aurora_active: "{{ aurora_sensor != '' and states(aurora_sensor) | float(0) > aurora_threshold | float(0) }}"
   new_year_window: "{{ now().month == 1 and now().day == 1 and now().hour == 0 and now().minute < 15 }}"
 
@@ -241,6 +633,36 @@ actions:
           - action: scene.turn_on
             target:
               entity_id: "{{ aurora_scene }}"
+      - alias: Custom holiday 1
+        conditions: "{{ custom_1_scene != '' and in_custom_1 }}"
+        sequence:
+          - action: scene.turn_on
+            target:
+              entity_id: "{{ custom_1_scene }}"
+      - alias: Custom holiday 2
+        conditions: "{{ custom_2_scene != '' and in_custom_2 }}"
+        sequence:
+          - action: scene.turn_on
+            target:
+              entity_id: "{{ custom_2_scene }}"
+      - alias: Custom holiday 3
+        conditions: "{{ custom_3_scene != '' and in_custom_3 }}"
+        sequence:
+          - action: scene.turn_on
+            target:
+              entity_id: "{{ custom_3_scene }}"
+      - alias: Custom holiday 4
+        conditions: "{{ custom_4_scene != '' and in_custom_4 }}"
+        sequence:
+          - action: scene.turn_on
+            target:
+              entity_id: "{{ custom_4_scene }}"
+      - alias: Halloween
+        conditions: "{{ halloween_scene != '' and in_halloween }}"
+        sequence:
+          - action: scene.turn_on
+            target:
+              entity_id: "{{ halloween_scene }}"
       - alias: December
         conditions: "{{ december_scene != '' and now().month == 12 }}"
         sequence:

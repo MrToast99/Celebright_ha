@@ -2,7 +2,7 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration for **Celebright** permanent / architectural LED lighting (CLC-series controllers). Control your lights, activate saved scenes, manage the built-in schedule, and automate it all from Home Assistant.
 
-> **Status:** `0.3.1`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
+> **Status:** `0.3.2`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
 
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/latest/total)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/total?label=downloads%40total)
@@ -25,6 +25,7 @@ Like the work? Help keep me Caffeinated!
 - [Dashboard](#dashboard)
   - [Optional cards (need HACS frontend cards)](#optional-cards-need-hacs-frontend-cards)
 - [Automations](#automations)
+  - [Manual automations (YAML)](#manual-automations-yaml)
 - [The schedule](#the-schedule)
   - [Create an event](#create-an-event)
   - [Update, delete, enable/disable](#update-delete-enabledisable)
@@ -192,16 +193,57 @@ Automations come as **blueprints**: you pick your controller and scenes from dro
 
 | Blueprint | What it does | |
 |---|---|---|
-| **Holiday lighting controller** | One automation for New Year fireworks, an optional aurora alert, December and week-long holidays (St. Patrick's, Canada Day, Canadian Thanksgiving, Remembrance Day, Easter Monday, Truth and Reconciliation). Leave a holiday's scene empty to skip it. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fholiday_lighting_controller.yaml) |
+| **Holiday lighting controller** | One automation for New Year fireworks, an optional aurora alert, Halloween (Oct 25–31), December and week-long holidays (St. Patrick's, Canada Day, Canadian Thanksgiving, Remembrance Day, Easter Monday, Truth and Reconciliation), plus four **custom holidays** of your own (any date range, even across New Year). Leave a holiday's scene empty to skip it. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fholiday_lighting_controller.yaml) |
 | **Scene at sunset during a date range** | A scene every night from sunset inside a yearly date range (may cross New Year); resumes the schedule at sunrise. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_in_date_range.yaml) |
 | **Scene for a holiday week** | A scene dusk to dawn for the Monday-Sunday week containing a date, every year. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_for_holiday_week.yaml) |
 | **Scene on a toggle** | A scene while an `input_boolean` is on; resumes the schedule when it turns off. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fscene_toggle.yaml) |
 | **Resume the schedule at a time** | Hands control back to the schedule at a set time each day. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fresume_schedule_at_time.yaml) |
 | **Controller offline notification** | Runs an action (a notification by default) when the controller has been unavailable for a while. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FMrToast99%2FCelebright_ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fcelebright%2Fcontroller_offline_notify.yaml) |
 
+- **Timing:** a week-long holiday runs Monday to Sunday around its date. Under **Adjust holiday timing** you can extend each by up to 14 days before or after, and move Halloween's first and last day. To shorten or move a holiday, leave its scene empty and use a custom holiday. Overlapping holidays resolve by priority: New Year, aurora, custom 1–4, Halloween, December, then the week-long ones.
 - Scenes are picked from your saved scenes (each one is a `scene.*` entity). Resuming the schedule uses the controller's scene dropdown, so pick it too.
 - Use the holiday controller **instead of** the date-range / holiday-week blueprints for the same lights; they would compete.
 - No import button? Paste the blueprint's GitHub URL into **Blueprints → Import Blueprint**. The files are in [`blueprints/automation/celebright`](blueprints/automation/celebright).
+
+### Manual automations (YAML)
+
+Prefer plain YAML to blueprints? [`celebright_automations.yaml`](celebright_automations.yaml) holds the same ideas as a list of automations: a holiday lighting controller, scene at sunset, Halloween, holiday week, party toggle, offline notification and lights off late at night. Two edits first:
+
+- **Slug:** the entity IDs use `house` (`select.house_scene`, `light.house`) because the reference controller is named House. Find and replace `house` with your own slug: **Settings → Devices & services → Entities**, search `celebright`, and take the part between the dot and `_scene` (`select.front_yard_scene` → `front_yard`).
+- **Scene names:** replace every `REPLACE WITH YOUR SCENE NAME` with a scene exactly as it appears in the scene dropdown.
+
+Then add it one of two ways (they need different formats):
+
+**A. Include the file (use it as-is).** Put it next to `configuration.yaml` (e.g. `/config/celebright_automations.yaml`, lowercase, ending in `.yaml`), then add this at the far left of `configuration.yaml`. If you already have an `automation:` line, add it on the next line; the word after `automation` is just a label:
+
+```yaml
+automation: !include automations.yaml            # may already exist
+automation celebright: !include celebright_automations.yaml
+```
+
+Run **Developer Tools → YAML → Check Configuration**, then **Reload Automations**. `Unable to read file …` means the file isn't beside `configuration.yaml` (wrong folder, a hidden `.txt`, or a capital letter).
+
+**B. Paste one automation into the UI.** The file is a list, so pasting all of it gives `extra keys not allowed @ data['0']`. In **Create automation → ⋮ → Edit in YAML**, paste a single automation as a plain mapping, with no leading `-` and no `id:` line:
+
+```yaml
+alias: Celebright scene at sunset
+description: ""
+triggers:
+  - trigger: sun
+    event: sunset
+conditions:
+  - condition: template
+    value_template: "{{ now().month == 12 }}"
+actions:
+  - action: select.select_option
+    target:
+      entity_id: select.house_scene
+    data:
+      option: "REPLACE WITH YOUR SCENE NAME"
+mode: single
+```
+
+Use the file's holiday controller **instead of** its simpler seasonal examples for the same lights; they would compete.
 
 ---
 
@@ -274,7 +316,7 @@ Event UUIDs are in the `sensor.<device>_scheduled_events` attributes. On v3 each
 | **Invalid authentication** | Re-check the email/password in the Celebright app. |
 | **Re-authenticate** prompt | Your password changed; enter the new one. |
 | Entities **Unavailable** | The controller is offline or the cloud is unreachable; check it in the Celebright app. |
-| **"Entity not found"** on the dashboard | Re-run **Generate dashboard**. |
+| **"Entity not found"** on the dashboard | Re-run **Generate dashboard**. In the manual automations file, replace the `house` slug (see **Manual automations**). |
 | Commands do nothing | Enable debug logging (below); the log names the failing command. A *"not acknowledged"* warning means the controller is online but didn't confirm it. |
 | **403** on a command | A transient AWS credential/clock issue; it retries. Open an issue if it persists. |
 

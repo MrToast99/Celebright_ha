@@ -205,4 +205,4 @@ views:
               data:
                 option: "<one of your saved scene names>"
           ```
-          Ready-made **blueprints** (holiday lighting and more) are listed in the README.
+          Ready-made **blueprints** and a manual YAML file (**celebright_automations.yaml**) are described in the README.
