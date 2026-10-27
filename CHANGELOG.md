@@ -4,7 +4,7 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
-## [0.3.2] - pending
+## [0.3.2] - 2026-10-26
 
 ### Upgrading from 0.3.1
 Update in HACS and restart. Nothing needs re-creating: existing holiday automations keep working, and the new inputs use their defaults until you set them. To use them, re-import the blueprint (**Blueprints → ⋮ → Re-import blueprint**) and edit your existing automation; don't create a new one.
