@@ -2,7 +2,7 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration for **Celebright** permanent / architectural LED lighting (CLC-series controllers). Control your lights, activate saved scenes, manage the built-in schedule, and automate it all from Home Assistant.
 
-> **Status:** `0.3.2`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
+> **Status:** `0.3.3`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
 
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/latest/total)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/total?label=downloads%40total)
@@ -253,7 +253,7 @@ Use the file's holiday controller **instead of** its simpler seasonal examples f
 The schedule runs on the controller itself. The integration shows it and can **create, edit, delete and enable/disable** events.
 
 - Times read as `Sunset`, `Sunrise` (with an offset like `Sunset +30 min` on newer controllers), `Midnight` or `HH:MM`; recurrence reads as *"Every December 31"* or *"1st Sunday of November"*.
-- Selecting a scene overrides the schedule; **Off** resumes it.
+- Selecting a scene overrides the schedule; **Off** resumes it. On firmware 3.x, which has no resume command, **Off** turns the manual scene off and the schedule's next event starts as usual (it can't jump into an event already in progress).
 - Features marked **v3** need a newer (firmware 3.x) controller: event offsets, per-event enable/disable, and "once" events.
 
 ### Create an event

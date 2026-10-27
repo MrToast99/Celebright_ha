@@ -231,6 +231,11 @@ def _merge_system_state_v3(state: DeviceState, system_state: dict[str, Any]) -> 
     """
     if system_state.get("active_source") is not None:
         state.active_source = system_state["active_source"]
+    # Event fields, when the controller reports them (AppSync is the usual source).
+    if "activeEvent" in system_state:
+        state.active_event_uuid = _as_uuid(system_state["activeEvent"])
+    if system_state.get("next_event_start_local"):
+        state.next_event_start = system_state["next_event_start_local"]
     flag = _schedule_flag(system_state)
     if flag is not None:
         state.schedule_enabled = flag

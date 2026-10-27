@@ -282,12 +282,6 @@ def _brightness_verdict(state: dict[str, Any], wanted: int) -> bool | None:
     return abs(int(level) - int(wanted)) <= 2
 
 
-def _resume_verdict(state: dict[str, Any]) -> bool | None:
-    if "active_source" not in state:
-        return None
-    return state["active_source"] != "user_display"
-
-
 def _scale_hex(hex_color: str, brightness: int) -> str:
     """Bake a 0-255 brightness into an RRGGBB colour (what v2 controllers expect)."""
     scale = max(0, min(255, brightness)) / 255.0
@@ -626,13 +620,17 @@ class CelebrightMQTT:
             await self.async_send_command("setResumeSchedule", {})
 
     async def async_resume_schedule(self) -> None:
-        """Hand control back to the schedule (same command on v2 and v3)."""
-        if self._is_v3:
-            await self._send_confirmed(
-                "setResumeSchedule", {}, strict=False, verify=_resume_verdict
-            )
-        else:
+        """Hand control back to the schedule."""
+        if not self._is_v3:
             await self.async_send_command("setResumeSchedule", {})
+            return
+        # Firmware 3.x rejects setResumeSchedule ("Unrecognized topic"). Only a manual display
+        # needs handing back: turning it off lets the next scheduled event start as usual, and
+        # a schedule that is already in control is left alone.
+        state = await self.async_get_system_state()
+        if state and state.get("active_source") != "user_display":
+            return
+        await self._send_confirmed("turnOff", {})
 
     async def async_set_schedule_enabled(self, enabled: bool) -> None:
         """Enable/disable the on-device schedule (v2 only; v3 firmware rejects the command)."""

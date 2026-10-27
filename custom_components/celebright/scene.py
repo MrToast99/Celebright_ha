@@ -27,9 +27,37 @@ def _unique_id(device_id: str, scene_uuid: str) -> str:
     return f"{device_id}_scene_{scene_uuid}"
 
 
+def _scenes_device_id(device_id: str) -> str:
+    return f"{device_id}_scenes"
+
+
 def _device_name(coordinator: CelebrightCoordinator, device_id: str) -> str:
     info = coordinator.device_infos.get(device_id)
     return info.name if info else device_id
+
+
+def _register_devices(
+    devices: dr.DeviceRegistry, entry: ConfigEntry, coordinator: CelebrightCoordinator, device_id: str
+) -> None:
+    """Create the controller's device, then the "<device> Scenes" sub-device linked to it."""
+    name = _device_name(coordinator, device_id)
+    parent = devices.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, device_id)},
+        manufacturer="Celebright",
+        name=name,
+    )
+    sub = dict(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, _scenes_device_id(device_id))},
+        manufacturer="Celebright",
+        model="Saved scenes",
+        name=f"{name} Scenes",
+    )
+    try:
+        devices.async_get_or_create(**sub, via_device_id=parent.id)
+    except TypeError:  # Home Assistant too old for via_device_id
+        devices.async_get_or_create(**sub, via_device=(DOMAIN, device_id))
 
 
 async def async_setup_entry(
@@ -47,13 +75,7 @@ async def async_setup_entry(
         for device_id in coordinator.data:
             scenes = coordinator.scenes.get(device_id, [])
             if device_id not in known:
-                # The sub-device points at the controller's device, which must exist first.
-                devices.async_get_or_create(
-                    config_entry_id=entry.entry_id,
-                    identifiers={(DOMAIN, device_id)},
-                    manufacturer="Celebright",
-                    name=_device_name(coordinator, device_id),
-                )
+                _register_devices(devices, entry, coordinator, device_id)
             seen = known.setdefault(device_id, set())
             current = {scene.uuid for scene in scenes}
             new.extend(
@@ -93,12 +115,12 @@ class CelebrightScene(CelebrightEntity, Scene):
 
     @property
     def device_info(self) -> DeviceInfo:
+        # The link to the controller is set in _register_devices (via_device is deprecated here).
         return DeviceInfo(
-            identifiers={(DOMAIN, f"{self._device_id}_scenes")},
+            identifiers={(DOMAIN, _scenes_device_id(self._device_id))},
             name=f"{_device_name(self.coordinator, self._device_id)} Scenes",
             manufacturer="Celebright",
             model="Saved scenes",
-            via_device=(DOMAIN, self._device_id),
         )
 
     @property

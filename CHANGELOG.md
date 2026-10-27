@@ -4,6 +4,15 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-10-27
+
+### Upgrading from 0.3.2
+Update in HACS and restart. Nothing else to do.
+
+### Fixed
+- **Scene "Off" (resume the schedule) did nothing on firmware 3.x:** the controller rejects `setResumeSchedule`, so a manual scene stayed on, e.g. holiday lights left on after sunrise. On v3, **Off** now turns off a manual display (the schedule's next event then starts as usual). Scene-select failures now fail the calling automation instead of only logging.
+- **Deprecation warning:** the "Scenes" sub-device is now linked to its controller with `via_device_id`, as Home Assistant 2027.8 will require.
+
 ## [0.3.2] - 2026-10-26
 
 ### Upgrading from 0.3.1

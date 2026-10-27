@@ -1,22 +1,21 @@
 """Scene selector: one saved-scene dropdown per controller.
 
-Picking a scene loads it; "Off" resumes the schedule.
+Picking a scene loads it; "Off" hands control back to the schedule (on firmware 3.x it turns
+off a manual display, and the next scheduled event starts as usual).
 """
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import CelebrightCommandError, CelebrightConnectionError
 from .coordinator import CelebrightCoordinator
 from .entity import CelebrightEntity
-
-_LOGGER = logging.getLogger(__name__)
 
 _OPTION_OFF = "Off"
 
@@ -70,14 +69,11 @@ class CelebrightSceneSelect(CelebrightEntity, SelectEntity):
             else:
                 uuid = self.coordinator.uuid_for_scene_name(self._device_id, option)
                 if not uuid:
-                    _LOGGER.error("Scene %r not found for device %s", option, self._device_id)
-                    return
+                    raise HomeAssistantError(f"Scene {option!r} not found")
                 await self.coordinator.client.async_load_scene(self._device_id, uuid)
                 self.coordinator.set_active_scene(self._device_id, uuid)
         except (CelebrightCommandError, CelebrightConnectionError) as err:
-            _LOGGER.error(
-                "Scene select failed for %s → %r: %s", self._device_id, option, err
-            )
-            return
+            # Raised, not just logged, so a failing automation shows red in its trace.
+            raise HomeAssistantError(f"Could not select {option!r}: {err}") from err
 
         self.coordinator.async_refresh_after_command()
