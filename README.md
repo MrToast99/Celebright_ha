@@ -8,8 +8,8 @@ A custom [Home Assistant](https://www.home-assistant.io/) integration for **Cele
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/total?label=downloads%40total)
 
 <!-- ha-marketplace:exclude-start -->
-[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=MrToast99&repository=Celebright_ha&category=integration)
-[![Open your Home Assistant instance and open this repository in HACS (Home Assistant 2026.10 and older).](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MrToast99&repository=Celebright_ha&category=integration)
+[![Install with the Home Assistant Marketplace (Home Assistant 2026.11 and newer)](https://img.shields.io/badge/Install_with_Marketplace-HA_2026.11%2B-03a9f4?logo=homeassistant&logoColor=white)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=MrToast99&repository=Celebright_ha&category=integration)
+[![Install with HACS (Home Assistant 2026.10 and older)](https://img.shields.io/badge/Install_with_HACS-HA_2026.10_and_older-ff9800?logo=homeassistantcommunitystore&logoColor=white)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MrToast99&repository=Celebright_ha&category=integration)
 <!-- ha-marketplace:exclude-end -->
 
 Like the work? Help keep me Caffeinated!
@@ -140,12 +140,14 @@ Newer controllers (firmware 3.x) use a newer MQTT protocol ("v3"); older ones us
 HACS is now built into Home Assistant as the **Marketplace**.
 
 1. **Settings → Marketplace**, then **Add from link** (upper right).
-2. Enter `MrToast99/Celebright_ha` and add it (the Marketplace asks you to connect GitHub the first time, which it needs to add a repository by link). Or use the **Marketplace** badge above.
+2. Enter `MrToast99/Celebright_ha` and add it (the Marketplace asks you to connect GitHub the first time, which it needs to add a repository by link). Or click the **Install with Marketplace** badge at the top.
 3. Open **Celebright** in the list and **Install**, then **restart Home Assistant** (a repair offers a Restart button).
 
 Updates arrive under **Settings → Updates**, with these release notes. Repositories added by link are checked every 48 hours.
 
 ### HACS (Home Assistant 2026.10 and older)
+
+(Or click the **Install with HACS** badge at the top, which opens HACS on your Home Assistant.)
 
 1. **HACS → Integrations → ⋮ → Custom repositories**.
 2. Add `https://github.com/MrToast99/Celebright_ha` with category **Integration**.
