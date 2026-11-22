@@ -19,7 +19,7 @@
  * events each controller has, then reads live state from Home Assistant.
  */
 
-const CARD_VERSION = "1.7.0";
+const CARD_VERSION = "1.7.2";
 
 const EN = {
   loading: "Loading…",
@@ -1064,7 +1064,7 @@ class CelebrightAutomationsCard extends HTMLElement {
 Object.assign(EN, {
   holidays: "Holidays",
   holRefresh: "Refresh",
-  holIntro: "Each holiday is one event on your controller, so it keeps running if Home Assistant is offline. Home Assistant updates it to next year's dates after each holiday, so it needs to be running then.",
+  holIntro: "Each holiday is one event on your controller, so it keeps running if Home Assistant is offline. Home Assistant checks every few hours and at startup, and moves it to next year's dates once the holiday has passed.",
   holNext: "Next",
   holNoScene: "Choose a scene",
   holOn: "On",
@@ -1453,6 +1453,10 @@ Object.assign(EN, {
   ruleSensorBelow: "A sensor is below",
   ruleEntityState: "An entity is",
   ruleEntity: "Entity",
+  ruleEntitySearch: "Search by name or entity id",
+  ruleEntityShow: "Show entities",
+  ruleNoMatch: "No match. You can still type an entity id.",
+  ruleMore: "{n} more: keep typing to narrow it down",
   ruleNumber: "Number",
   ruleState: "State",
   ruleOnlyDark: "Only after dark",
@@ -1490,6 +1494,18 @@ const RULE_CSS = `
   .rule .movers ha-icon { --mdc-icon-size: 18px; }
   .rules { display: grid; gap: 8px; }
   .rchip { font-size: 0.72rem; font-weight: 500; padding: 1px 8px; border-radius: 999px; background: var(--secondary-background-color); color: var(--secondary-text-color); }
+  .combo { position: relative; }
+  .combo input { padding-right: 40px; }
+  .combo-btn { position: absolute; right: 2px; top: 0; width: 40px; height: 42px; border: 0; background: transparent; color: var(--secondary-text-color); display: grid; place-items: center; padding: 0; }
+  .combo-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 6; max-height: 260px; overflow: auto; overscroll-behavior: contain;
+                background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, .3); }
+  .combo-list[hidden] { display: none; }
+  .copt { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; width: 100%; min-height: 44px; padding: 6px 12px; border: 0; background: transparent; color: var(--primary-text-color); text-align: left; align-items: center; }
+  .copt.active, .copt:hover { background: var(--secondary-background-color); }
+  .copt .cn { grid-column: 1; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .copt .ci { grid-column: 1; font-size: 0.75rem; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .copt .cs { grid-column: 2; grid-row: 1 / span 2; font-size: 0.82rem; color: var(--secondary-text-color); white-space: nowrap; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  .cnone { padding: 10px 12px; color: var(--secondary-text-color); font-size: 0.88rem; }
   .rchip.applied { background: color-mix(in srgb, var(--success-color, #2e7d32) 18%, transparent); color: var(--success-color, #2e7d32); }
   .rchip.error { background: color-mix(in srgb, var(--error-color, #c62828) 15%, transparent); color: var(--error-color, #c62828); }
   .chips2 { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1738,9 +1754,11 @@ class CelebrightRulesCard extends HTMLElement {
           <option value="sensor_above" ${draft.type === "sensor_above" ? "selected" : ""}>${t("ruleSensorAbove")}</option>
           <option value="sensor_below" ${draft.type === "sensor_below" ? "selected" : ""}>${t("ruleSensorBelow")}</option>
           <option value="entity_state" ${draft.type === "entity_state" ? "selected" : ""}>${t("ruleEntityState")}</option></select></label>
-        <label class="field"><span>${t("ruleEntity")}</span><input data-f="entity_id" list="ents" autocomplete="off" placeholder="sensor.aurora_visibility" value="${esc(draft.entity_id)}">
-          <datalist id="ents">${this._entityIds(draft.type).map((id) => `<option value="${esc(id)}" label="${esc(this._hass.states[id].attributes.friendly_name || "")}"></option>`).join("")}</datalist>
-          <span class="hint" id="reading"></span></label>
+        <div class="field"><span>${t("ruleEntity")}</span>
+          <div class="combo" id="combo"><input data-f="entity_id" role="combobox" aria-autocomplete="list" aria-expanded="false" autocomplete="off" spellcheck="false" placeholder="${t("ruleEntitySearch")}" value="${esc(draft.entity_id)}">
+            <button type="button" class="combo-btn" data-combo="toggle" tabindex="-1" aria-label="${t("ruleEntityShow")}"><ha-icon icon="mdi:menu-down"></ha-icon></button>
+            <div class="combo-list" id="clist" role="listbox" hidden></div></div>
+          <span class="hint" id="reading"></span></div>
         <label class="field"><span>${sensorType ? t("ruleNumber") : t("ruleState")}</span>
           <input data-f="value" ${sensorType ? 'type="number" step="any"' : 'placeholder="on"'} value="${esc(draft.value)}"></label>
         ${check("only_dark", t("ruleOnlyDark"), draft.only_dark)}
@@ -1767,12 +1785,67 @@ class CelebrightRulesCard extends HTMLElement {
       el.textContent = reading == null ? "" : `${t("ruleNow")}: ${reading}`;
     };
 
+    // ---- the searchable entity list: matches the id or the friendly name, shows the live state ----
+    let active = -1;
+    const combo = () => ({ input: sheet.querySelector('[data-f="entity_id"]'), list: sheet.querySelector("#clist") });
+    const closeCombo = () => {
+      const { input, list } = combo();
+      if (list) list.hidden = true;
+      if (input) input.setAttribute("aria-expanded", "false");
+      active = -1;
+    };
+    const openCombo = (showAll) => {
+      const { input, list } = combo();
+      if (!input || !list) return;
+      const q = showAll ? "" : input.value.trim().toLowerCase();
+      const tokens = q.split(/\s+/).filter(Boolean);
+      const rows = this._entityIds(draft.type).map((id) => {
+        const name = (this._hass.states[id].attributes && this._hass.states[id].attributes.friendly_name) || "";
+        return { id, name, hay: `${id} ${name}`.toLowerCase() };
+      }).filter((c) => tokens.every((tk) => c.hay.includes(tk)));
+      rows.sort((a, b) => (Number(b.id.startsWith(q)) - Number(a.id.startsWith(q))) || (a.name || a.id).localeCompare(b.name || b.id));
+      const shown = rows.slice(0, 60);
+      list.innerHTML = shown.length
+        ? shown.map((c) => `<button type="button" class="copt" role="option" data-pick="${esc(c.id)}"><span class="cn">${esc(c.name || c.id)}</span><span class="ci">${esc(c.id)}</span><span class="cs">${esc(this._reading(c.id) || "")}</span></button>`).join("")
+          + (rows.length > shown.length ? `<div class="cnone">${t("ruleMore").replace("{n}", rows.length - shown.length)}</div>` : "")
+        : `<div class="cnone">${t("ruleNoMatch")}</div>`;
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      active = -1;
+    };
+    const pickEntity = (id) => {
+      draft.entity_id = id;
+      const { input } = combo();
+      if (input) input.value = id;
+      closeCombo();
+      paintReading();
+    };
+    const moveActive = (step) => {
+      const opts = [...sheet.querySelectorAll(".copt")];
+      if (!opts.length) return;
+      active = (active + step + opts.length) % opts.length;
+      opts.forEach((o, i) => o.classList.toggle("active", i === active));
+      opts[active].scrollIntoView({ block: "nearest" });
+    };
+
     render();
+    // An entity that is already chosen shows the whole list on focus (to change it); typing narrows the list.
+    sheet.addEventListener("focusin", (e) => {
+      if (e.target.matches && e.target.matches('[data-f="entity_id"]')) openCombo(!!this._hass.states[e.target.value.trim().toLowerCase()]);
+    });
+    sheet.addEventListener("keydown", (e) => {
+      if (!e.target.matches || !e.target.matches('[data-f="entity_id"]')) return;
+      const list = combo().list;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (list.hidden) openCombo(false); moveActive(e.key === "ArrowDown" ? 1 : -1); }
+      else if (e.key === "Enter" && !list.hidden && active >= 0) { e.preventDefault(); pickEntity(sheet.querySelectorAll(".copt")[active].dataset.pick); }
+      else if (e.key === "Escape" && !list.hidden) { e.preventDefault(); e.stopPropagation(); closeCombo(); }
+      else if (e.key === "Tab") closeCombo();
+    });
     sheet.addEventListener("input", (e) => {
       const f = e.target.dataset.f;
       if (!f) return;
       if (f === "name" || f === "entity_id" || f === "value" || f === "hours" || f === "tstart" || f === "tend") draft[f] = e.target.value;
-      if (f === "entity_id") paintReading();
+      if (f === "entity_id") { paintReading(); openCombo(false); }
     });
     sheet.addEventListener("change", (e) => {
       const f = e.target.dataset.f || "";
@@ -1786,6 +1859,14 @@ class CelebrightRulesCard extends HTMLElement {
       }
     });
     sheet.addEventListener("click", async (e) => {
+      const choice = e.target.closest("[data-pick]");
+      if (choice) { pickEntity(choice.dataset.pick); return; }
+      if (e.target.closest('[data-combo="toggle"]')) {
+        const { input, list } = combo();
+        if (list.hidden) { openCombo(true); input.focus({ preventScroll: true }); } else closeCombo();
+        return;
+      }
+      if (!e.target.closest("#combo")) closeCombo();
       const preset = e.target.closest("[data-preset]");
       const scene = e.target.closest("[data-uuid]");
       if (preset) {

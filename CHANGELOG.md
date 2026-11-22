@@ -4,6 +4,17 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-11-22
+
+### Upgrading
+**From 0.4.0:** update, restart Home Assistant, refresh your browser once. Nothing else to do.
+
+**From 0.3.3 or older:** follow the **migration guide in the 0.4.0 entry below**. It still applies, and 0.4.1 includes everything in 0.4.0.
+
+### Changed
+- **The Holidays tab explains when the dates move.** It now says that Home Assistant checks every few hours and at startup, and moves each holiday's event to next year's dates once the holiday has passed. The wording before could be read as the Celebright cloud doing it. The README explains the same, including that Home Assistant only has to be running at some point after each holiday, not during it.
+- **Rules: the Entity field is a searchable dropdown.** Click it (or its arrow) to see your sensors, switches and other entities with their live state, type to narrow the list by name or entity id, and pick with the mouse, a tap or the arrow keys and Enter. A sensor rule lists numeric entities only; an entity-state rule lists everything. You can still type an entity id that isn't listed.
+
 ## [0.4.0] - 2026-11-22
 
 ### Migration guide: 0.3.3 → 0.4.0

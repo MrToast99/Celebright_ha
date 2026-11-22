@@ -2,7 +2,7 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration for **Celebright** permanent / architectural LED lighting (CLC-series controllers). Control your lights, pick saved scenes (with colour previews), manage the built-in schedule and your holidays, react to things like the aurora, and automate it all from Home Assistant, with a graphical page of its own in the sidebar.
 
-> **Status:** `0.4.0`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
+> **Status:** `0.4.1`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
 
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/latest/total)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/total?label=downloads%40total)
@@ -161,7 +161,7 @@ Copy `custom_components/celebright` into your config folder (`<config>/custom_co
 
 ### Upgrading from 0.3.3?
 
-Read the **migration guide** at the top of the [changelog](CHANGELOG.md). It is short: update, restart, refresh the browser.
+Read the **migration guide** in the 0.4.0 entry of the [changelog](CHANGELOG.md). It is short: update, restart, refresh the browser. Version 0.4.1 includes everything in 0.4.0.
 <!-- ha-marketplace:exclude-end -->
 
 ---
@@ -217,7 +217,7 @@ New installs get a **Celebright** item in Home Assistant's sidebar, with nothing
 
 The sidebar page's **Holidays** tab (also `custom:celebright-holidays-card`) is a graphical way to light your holidays: a tile for each of New Year fireworks, December, St. Patrick's Day, Easter Monday, Canada Day, Truth and Reconciliation, Canadian Thanksgiving, Halloween and Remembrance Day. Pick a scene (with its colour preview), switch the tile on, and optionally add or remove days before and after. **Add a holiday** makes your own, from any start to end date (it may cross New Year).
 
-**How it works.** Each holiday is **one ordinary event on your controller**, named `Holiday: <name>`, that covers the *next* occurrence: nightly from sunset to midnight, from the first night to the last. When that window has passed, **this integration, running in your Home Assistant (not Celebright's cloud)**, updates the same event to next year's dates. It checks every few hours. It never relies on the controller's yearly repeat rules, which can't express a moving holiday or a window that starts before the date and ends after it. Because the event lives on the controller, it keeps running if Home Assistant, your internet or Celebright's cloud is down; Home Assistant only has to be running at some point after each holiday to roll the dates forward. If it is off for the whole stretch until the next holiday, the event simply stays on the old dates and doesn't play until Home Assistant is back and has updated it.
+**How it works.** Each holiday is **one ordinary event on your controller**, named `Holiday: <name>`, that covers the *next* occurrence: nightly from sunset to midnight, from the first night to the last. When that window has passed, **this integration, running in your Home Assistant (not Celebright's cloud)**, updates the same event to next year's dates. It checks every few hours and whenever Home Assistant starts, so it only has to be running at some point after the holiday has passed. It never relies on the controller's yearly repeat rules, which can't express a moving holiday or a window that starts before the date and ends after it. Because the event lives on the controller, it keeps running if Home Assistant, your internet or Celebright's cloud is down; Home Assistant only has to be running at some point after each holiday to roll the dates forward. If it is off for the whole stretch until the next holiday, the event simply stays on the old dates and doesn't play until Home Assistant is back and has updated it.
 
 - **Week holidays** cover the Monday-Sunday week that contains the date (so Canadian Thanksgiving, the 2nd Monday of October, and Easter Monday follow the calendar by themselves). Halloween is Oct 25-31, December is the whole month, and New Year fireworks is midnight to 00:15 on Jan 1.
 - **Extra days** (up to 14 either way) widen the window, or narrow it with a negative number.
@@ -234,7 +234,7 @@ The sidebar page's **Rules** tab (also `custom:celebright-rules-card`) shows a s
 **Aurora, step by step.** Open **Rules → Aurora alert**. Celebright looks for a sensor with "aurora" in its name and fills it in, with *above 75* and *only after dark* already set; pick the scene and **Save**. That's the whole setup.
 
 A rule is made of:
-- **When:** a sensor is above or below a number, or an entity is in a state (default `on`, for a switch, toggle, presence sensor and so on).
+- **When:** a sensor is above or below a number, or an entity is in a state (default `on`, for a switch, toggle, presence sensor and so on). You choose the entity from a **searchable dropdown**: it lists them by name with their live state, and typing narrows it by name or entity id.
 - **Limits (optional):** only after dark; only between two dates (may cross New Year); only between two times (may cross midnight); stop after a number of hours.
 - **A scene** (with its colour preview).
 
