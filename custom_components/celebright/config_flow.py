@@ -5,10 +5,12 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
 
 from .api import CelebrightAuthError, CelebrightCloudAPI, CelebrightConnectionError
-from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
+from .const import CONF_EMAIL, CONF_PASSWORD, CONF_SHOW_SIDEBAR, DOMAIN
+from .sidebar import sidebar_enabled
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +26,11 @@ class CelebrightConfigFlow(ConfigFlow, domain=DOMAIN):
     """Single-step setup: email + password → Cognito auth validation."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> "CelebrightOptionsFlow":
+        return CelebrightOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -52,7 +59,10 @@ class CelebrightConfigFlow(ConfigFlow, domain=DOMAIN):
 
         await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
         self._abort_if_unique_id_configured()
-        return self.async_create_entry(title="Celebright", data=user_input)
+        # New installs get the sidebar page; existing entries have no such option and keep it off.
+        return self.async_create_entry(
+            title="Celebright", data=user_input, options={CONF_SHOW_SIDEBAR: True}
+        )
 
     # --- Re-authentication (started by Home Assistant when the saved login is rejected) ---
 
@@ -99,3 +109,23 @@ class CelebrightConfigFlow(ConfigFlow, domain=DOMAIN):
             await client.async_connect()
         finally:
             await client.async_disconnect()
+
+
+class CelebrightOptionsFlow(OptionsFlow):
+    """Options: show the Celebright page in the sidebar."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        # Not self.config_entry: newer cores provide it and reject assigning it.
+        self._entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_SHOW_SIDEBAR, default=sidebar_enabled(self._entry)): bool}
+            ),
+        )

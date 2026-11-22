@@ -25,6 +25,7 @@ from .base import (
     SceneInfo,
 )
 from .mqtt import CelebrightMQTT, compute_event_md5
+from .scene_look import scene_preview
 from ..const import (
     API_BASE,
     APPSYNC_URL,
@@ -409,7 +410,7 @@ class CelebrightCloudAPI(CelebrightAPIBase):
     async def async_get_scenes(self, device_id: str) -> list[SceneInfo]:
         data = await self._post(EP_GET_DEVICE_SCENES, {"deviceId": device_id})
         return [
-            SceneInfo(uuid=s["uuid"], name=s["name"])
+            SceneInfo(uuid=s["uuid"], name=s["name"], preview=scene_preview(s.get("displays")))
             for s in data.get("scenes", [])
             if s.get("uuid") and s.get("name")
         ]

@@ -4,6 +4,58 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-11-22
+
+### Migration guide: 0.3.3 → 0.4.0
+
+**Short version:** update, restart Home Assistant, refresh your browser. Your entities, login, automations and scenes carry over untouched. Everything new is optional, and nothing is removed from your Home Assistant.
+
+#### Before you update
+- **Home Assistant 2024.10 or newer is required** (the blueprints already needed it). On an older version the update isn't offered.
+- If you edited `celebright_dashboard.yaml` and want to keep your edits, copy the file somewhere safe. Nothing overwrites it until *you* regenerate the dashboard.
+
+#### Update
+1. **Marketplace (Home Assistant 2026.11+):** **Settings → Updates → Celebright → Install**. **HACS (2026.10 and older):** update **Celebright** in HACS.
+2. **Restart Home Assistant** (a repair offers a button).
+3. **Refresh your browser** once (Ctrl+F5, or clear the app cache in the Companion app) so it loads the new card.
+
+#### After you update
+| What | What to do |
+|---|---|
+| **Sidebar page** | New installs get a **Celebright** item in the sidebar. Yours keeps it **off**; turn it on at **Settings → Devices & services → Celebright → Configure → Show Celebright in the sidebar**. This is the easiest way to get everything below. |
+| **Holidays** (new) | Set your holidays on the sidebar page's **Holidays** tab. If you use the *holiday lighting controller* blueprint, **switch it off** once you've set the same holidays there, or the two will compete. |
+| **Aurora and other "while something is true" scenes** | The blueprint's aurora alert and the *scene on a toggle* blueprint are replaced by the **Rules** tab (its **Aurora alert** starter takes a minute). Recreate them there *before* you switch the blueprint off. |
+| **Your dashboard** | Unchanged. To get the new cards on a generated dashboard, run **Developer Tools → Actions → `Celebright: Generate dashboard`** again (it rewrites `celebright_dashboard.yaml`). A YAML dashboard has no card picker: add `type: custom:celebright-card` yourself, ideally in a **panel** view. The generated dashboard is now three full-width views (**Control**, **Holidays**, **Rules**); the old **Lights**, **Schedule** and **Automations** views are gone. |
+| **Old YAML** | If you still use `celebright_automations.yaml` or the old dashboard file, see "Removing the old YAML" in the README. Don't run the old holiday YAML next to the Holidays tab. |
+| **Blueprints and the Automations tab** | Your blueprint automations still work and stay in **Settings → Automations & Scenes**. The *holiday lighting controller*, *date range*, *holiday week* and *scene on a toggle* blueprints are superseded by Holidays and Rules but not removed. There is no Automations tab on the sidebar page any more (a saved Automations tab choice falls back to Control). |
+
+#### If something goes wrong
+- The card doesn't show: open `/celebright_static/celebright-card.js` on your Home Assistant address (it should show JavaScript), hard-refresh, then check the README's "The card isn't showing up?" steps.
+- You can go back: in the Marketplace or HACS, open Celebright, choose the version menu and pick **0.3.3**. New data (holiday and rule settings) is kept in Home Assistant's storage and simply ignored by 0.3.3. Delete the `Holiday: …` events from the Celebright app if you no longer want them. Also remove the `/celebright_static/celebright-card.js` resource under **Settings → Dashboards → Resources** (0.4.0 added it; 0.3.3 doesn't serve it).
+
+### Added
+- **The Celebright card** (`custom:celebright-card`), see the README:
+  - Power, brightness and colour.
+  - A searchable scene list with **colour previews** (solid colour, pattern palette or individual bulbs) and **Resume schedule**.
+  - The schedule, with a form to add, edit, delete and switch events on and off.
+  - Light and dark themes, two columns when wide, and a phone layout where the editor becomes a bottom sheet.
+- **The automations card** (`custom:celebright-automations-card`, same file): your blueprint-based automations grouped by blueprint, each with a switch, **Run now**, last run and **Edit**, a **Create** button for blueprints you haven't used (not for the superseded ones, which show only if you still have an automation from them), and a warning when two holiday controllers are both on. It is for dashboards of your own; it isn't on the sidebar page or the generated dashboard.
+- **Holidays** (`custom:celebright-holidays-card`, and a tab on the sidebar page): a tile for each holiday with a scene picker and colour previews, extra days before and after, and your own holidays. Each holiday is one event on the controller named `Holiday: <name>` holding the next occurrence's real dates (nightly, sunset to midnight), and the same event is updated to next year's dates by the integration (in Home Assistant, not the cloud) once its window has passed. This replaces the controller's yearly repeat rules, which can't express a moving holiday (Thanksgiving, Easter Monday) or a window around the date. It keeps working if Home Assistant is offline, only touches events it created, and warns if the holiday lighting blueprint is also on. Settings are stored in Home Assistant; commands `celebright/holidays`, `holiday_set`, `holiday_custom_save` and `holiday_custom_remove`.
+- **Rules** (`custom:celebright-rules-card`, and a tab on the sidebar page): show a scene while something is true, then return to the schedule. When: a sensor is above or below a number, or an entity is in a state. Limits: only after dark, between dates, between times, stop after N hours. Rules are a priority list; an **Aurora alert** starter finds your aurora sensor and presets 75 and "only after dark". The scene a rule set is released only if it is still showing, so a scene picked by hand is never cleared. Runs in Home Assistant; stored in Home Assistant. Commands `celebright/rules`, `rule_save`, `rule_delete`, `rule_move`.
+- **A Celebright page in the sidebar** (`celebright-panel`, same file): Control, Holidays and Rules as three tabs, a controller picker when there are several, a phone layout with the sidebar's menu button. Turn it on or off in the integration's **Configure** options (no restart). It is on for new installs only; an existing install keeps it off until you switch it on.
+- **Regenerate this dashboard** button under the card on the generated dashboard's Control view: it runs `celebright.generate_dashboard` for you (it asks first, and rewrites the default `celebright_dashboard.yaml`).
+- The integration serves the card and adds it to Lovelace's resources itself. With YAML-mode resources it loads the card on every page instead.
+- A `celebright/card_info` websocket command that tells the card each controller's entities, scenes (with their colours) and editable events.
+
+### Fixed
+- Reloading the only Celebright entry (which a password re-authentication does) removed the card's Lovelace resource until the next restart. The resource is now removed only when the last entry is deleted, and added again when a new one is set up.
+
+### Changed
+- **The generated dashboard is three full-width views:** **Control** (the card), **Holidays** and **Rules**, matching the sidebar page. The **Lights**, **Schedule** and **Automations** views are gone, since the cards do what they did and more. The README has a stock-card snippet if you want one, and no longer lists the one-tap scene-button extra (the card's scene tiles replace it).
+- `frontend`, `http`, `lovelace`, `panel_custom` and `websocket_api` are now declared manifest dependencies, and `hacs.json` requires Home Assistant 2024.10.
+- **HACS and the Home Assistant Marketplace** (built into Home Assistant 2026.11 and newer, with the same catalog and `hacs.json`): the README explains installing from the Marketplace or HACS and has "Open in Marketplace / HACS" badges, with the install parts hidden from the Marketplace page. `hacs.json` now holds only documented keys (`name`, `homeassistant`), the manifest declares an integration category (`lighting.led_strips_controllers`), and the validation workflows use the documented HACS action inputs and can be started by hand.
+- **README:** screenshots (control, holidays, rules, the editors, automations and a phone view), a full features table, a "what runs where" table, current entities and services, an examples section, and troubleshooting for the new tabs.
+
 ## [0.3.3] - 2026-10-27
 
 ### Upgrading from 0.3.2

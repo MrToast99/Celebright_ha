@@ -1,13 +1,24 @@
 {
   "domain": "celebright",
   "name": "Celebright",
-  "codeowners": ["@MrToast99"],
+  "categories": [
+    "lighting.led_strips_controllers"
+  ],
+  "codeowners": [
+    "@MrToast99"
+  ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "frontend",
+    "http",
+    "lovelace",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/MrToast99/Celebright_ha",
   "integration_type": "device",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/MrToast99/Celebright_ha/issues",
   "requirements": [],
-  "version": "0.3.3"
+  "version": "0.4.0"
 }

@@ -37,5 +37,18 @@
       "reauth_successful": "Re-authentication successful. Celebright is reconnecting.",
       "reauth_failed": "Could not find the Celebright account to re-authenticate."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Celebright options",
+        "data": {
+          "show_sidebar": "Show Celebright in the sidebar"
+        },
+        "data_description": {
+          "show_sidebar": "A page with the Celebright card and your automations, in Home Assistant's sidebar. No dashboard needed."
+        }
+      }
+    }
   }
 }

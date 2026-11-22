@@ -1,6 +1,8 @@
 blueprint:
   name: Celebright holiday lighting controller
   description: >
+    Consider the Holidays tab in the Celebright sidebar page instead: it schedules holidays on the controller itself. Use the Rules tab for the aurora alert or anything else that depends on a Home Assistant sensor. Never run this alongside the Holidays tab.
+
     One automation for all scheduled lighting. Every trigger re-evaluates the date and
     time and applies the highest-priority matching scene: New Year fireworks, an aurora
     alert, up to four custom holidays of your own, Halloween, December, then the week-long

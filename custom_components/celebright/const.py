@@ -3,6 +3,7 @@ DOMAIN = "celebright"
 # Config entry keys
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
+CONF_SHOW_SIDEBAR = "show_sidebar"  # option: the Celebright page in the sidebar
 
 # AWS / Cognito (from HAR capture)
 AWS_REGION = "ca-central-1"

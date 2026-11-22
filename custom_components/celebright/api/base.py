@@ -45,6 +45,7 @@ class SceneInfo:
     """One saved scene from getDeviceScenes."""
     uuid: str
     name: str
+    preview: dict[str, Any] | None = None  # colours for the card's preview strip (see scene_look.py)
 
 
 @dataclass

@@ -3,6 +3,8 @@ blueprint:
   description: >
     Shows a scene while a toggle (input_boolean) is on, and hands control back to the
     schedule when it turns off.
+
+    The Rules tab in the Celebright sidebar page does this graphically (and also handles sensors).
   domain: automation
   author: MrToast99
   source_url: https://github.com/MrToast99/Celebright_ha/blob/main/blueprints/automation/celebright/scene_toggle.yaml

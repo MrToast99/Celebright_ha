@@ -1,8 +1,8 @@
 """Build the Celebright dashboard for one controller from the bundled template.
 
-The template (dashboard.yaml) uses placeholder entity IDs (`light.house`, ...) and the
-placeholder device name "House". Each placeholder is swapped for the controller's real
-entity, found by unique ID, so renamed entities and any device name work.
+The template (dashboard.yaml) holds the controller's device id (`__DEVICE_ID__`) for the
+Celebright cards, and can hold placeholder entity IDs (`light.house`, ...), each swapped for the
+controller's real entity (found by unique ID, so renamed entities work).
 """
 from __future__ import annotations
 
@@ -55,12 +55,10 @@ def build_dashboard(
             return match.group(0)
         return entity_id
 
-    text = _PLACEHOLDER.sub(swap, template)
+    text = _PLACEHOLDER.sub(swap, template.replace("__DEVICE_ID__", device_id))
     # Drop card rows for entities this controller doesn't have (instead of "Entity not found").
     for placeholder in missing:
         text = re.sub(
             rf"^([ \t]*)- entity: {re.escape(placeholder)}\n(?:\1  name: .*\n)?", "", text, flags=re.M
         )
-    # Display names in the help text.
-    text = text.replace("**House Scene**", f"**{device_name} Scene**").replace("**House**", f"**{device_name}**")
     return text, missing
