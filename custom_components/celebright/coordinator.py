@@ -7,6 +7,7 @@ import time
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -193,3 +194,7 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
 
     def first_device_id(self) -> str | None:
         return next(iter(self.device_infos), None)
+
+
+# A config entry whose runtime_data is the coordinator (typed, so entry.runtime_data checks out).
+CelebrightConfigEntry = ConfigEntry[CelebrightCoordinator]

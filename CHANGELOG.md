@@ -9,6 +9,15 @@ All notable changes are documented here. The format follows
 ### Fixed
 - **Home Assistant logged "calls hass.async_create_task from a thread other than the event loop" for the rules engine.** The handler that reacts to a sensor or switch changing was not marked as running on the event loop, so Home Assistant ran it in a worker thread. It now runs on the loop. The warning was the only symptom seen, but Home Assistant warns that this can corrupt data, so update. **To update:** update, restart Home Assistant. Nothing else to do.
 
+### Added
+- **Diagnostics download.** **Settings → Devices & services → Celebright → ⋮ → Download diagnostics** gives a file for a bug report. It holds the firmware, LED count, schedule, scene count and live state of each controller, and leaves out your email, password, controller name and id, and location.
+
+### Changed
+- **Entity names and icons come from translation files**, so they can be translated. The English names are unchanged, and so are your entity ids.
+- **The device-info sensors are off by default on new installs** (model, hardware version, LED count, bulb type, colour order, location). The device page already shows them. Enable any you want under Settings → Devices & services → Entities. Existing installs keep what they have. Firmware and the live-status sensors stay on.
+- **Services are registered when Home Assistant starts**, not when the first entry loads, so they exist (and give a clear error) even while the login is being re-entered. Wrong input to a service now reports as a validation error instead of a general failure.
+- **Entities are limited to one command at a time** per platform, so a burst of commands to several scenes no longer hits the cloud together.
+
 ## [0.4.1] - 2026-11-22
 
 ### Upgrading

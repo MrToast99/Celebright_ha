@@ -5,12 +5,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .coordinator import CelebrightCoordinator
+from .coordinator import CelebrightConfigEntry, CelebrightCoordinator
 from .entity import CelebrightEntity
 
 
@@ -108,58 +107,53 @@ SENSOR_DESCRIPTIONS: tuple[CelebrightSensorDescription, ...] = (
     # ── Live status ──────────────────────────────────────────────────
     CelebrightSensorDescription(
         key="current_display",
-        name="Current Display",
-        icon="mdi:television-play",
+        translation_key="current_display",
         value_fn=_current_display,
     ),
     CelebrightSensorDescription(
         key="active_event",
-        name="Active Event",
-        icon="mdi:calendar-star",
+        translation_key="active_event",
         value_fn=_active_event,
     ),
     CelebrightSensorDescription(
         key="next_event_start",
-        name="Next Event Start",
-        icon="mdi:calendar-arrow-right",
+        translation_key="next_event_start",
         value_fn=_next_event_start,
     ),
     CelebrightSensorDescription(
         key="active_source",
-        name="Active Source",
-        icon="mdi:source-branch",
+        translation_key="active_source",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_active_source,
     ),
     # ── Static device info ───────────────────────────────────────────
     CelebrightSensorDescription(
         key="model",
-        name="Model",
-        icon="mdi:information-outline",
+        translation_key="model",
+        entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_model,
         is_static=True,
     ),
     CelebrightSensorDescription(
         key="firmware",
-        name="Firmware",
-        icon="mdi:chip",
+        translation_key="firmware",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_firmware,
         is_static=True,
     ),
     CelebrightSensorDescription(
         key="hw_version",
-        name="Hardware Version",
-        icon="mdi:developer-board",
+        translation_key="hw_version",
+        entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_hw_version,
         is_static=True,
     ),
     CelebrightSensorDescription(
         key="led_count",
-        name="LED Count",
-        icon="mdi:led-strip-variant",
+        translation_key="led_count",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement="LEDs",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_led_count,
@@ -167,24 +161,24 @@ SENSOR_DESCRIPTIONS: tuple[CelebrightSensorDescription, ...] = (
     ),
     CelebrightSensorDescription(
         key="bulb_type",
-        name="Bulb Type",
-        icon="mdi:lightbulb-cfl",
+        translation_key="bulb_type",
+        entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_bulb_type,
         is_static=True,
     ),
     CelebrightSensorDescription(
         key="color_order",
-        name="Color Order",
-        icon="mdi:palette",
+        translation_key="color_order",
+        entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_color_order,
         is_static=True,
     ),
     CelebrightSensorDescription(
         key="location",
-        name="Location",
-        icon="mdi:map-marker",
+        translation_key="location",
+        entity_registry_enabled_default=False,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_location,
         is_static=True,
@@ -192,8 +186,7 @@ SENSOR_DESCRIPTIONS: tuple[CelebrightSensorDescription, ...] = (
     # ── Schedule ─────────────────────────────────────────────────────
     CelebrightSensorDescription(
         key="scheduled_events",
-        name="Scheduled Events",
-        icon="mdi:calendar-multiple",
+        translation_key="scheduled_events",
         native_unit_of_measurement="events",
         value_fn=_scheduled_event_count,
         is_static=True,
@@ -201,9 +194,13 @@ SENSOR_DESCRIPTIONS: tuple[CelebrightSensorDescription, ...] = (
 )
 
 
+# Updates come from the coordinator, so entities never poll on their own.
+PARALLEL_UPDATES = 0
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CelebrightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: CelebrightCoordinator = entry.runtime_data
@@ -231,11 +228,6 @@ class CelebrightSensor(CelebrightEntity, SensorEntity):
         super().__init__(coordinator, device_id)
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
-
-    # has_entity_name=True: HA prefixes the device name, so return only the sensor name.
-    @property
-    def name(self) -> str:
-        return self.entity_description.name
 
     @property
     def native_value(self):

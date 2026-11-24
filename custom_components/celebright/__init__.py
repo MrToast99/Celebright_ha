@@ -14,10 +14,10 @@ from homeassistant.helpers.event import async_track_time_interval
 from .api import CelebrightAuthError, CelebrightConnectionError, CelebrightLoginError
 from .card import async_register_card, async_serve_card, async_unregister_card
 from .const import DOMAIN
-from .coordinator import CelebrightCoordinator
+from .coordinator import CelebrightConfigEntry, CelebrightCoordinator
 from .holiday_manager import get_manager
 from .rule_engine import get_engine
-from .services import async_register_services, async_unregister_services
+from .services import async_register_services
 from .sidebar import async_follow_entries, async_update_sidebar_panel
 from .websocket_api import async_register_websocket
 
@@ -33,7 +33,10 @@ PLATFORMS = [
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Once per Home Assistant run: the card's files, websocket command, Lovelace resource and sidebar page."""
+    """Once per Home Assistant run: services, the card's files, websocket command, Lovelace resource and sidebar page."""
+    # Services belong here, not in async_setup_entry, so they exist (and report a clear error) even
+    # while no entry is loaded, for example while the login is being re-entered.
+    async_register_services(hass)
     async_register_websocket(hass)
     await async_serve_card(hass)
     # The sidebar page follows the config entries, loaded or not (see sidebar.py).
@@ -51,7 +54,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: CelebrightConfigEntry) -> bool:
     coordinator = CelebrightCoordinator(hass, dict(entry.data))
     try:
         await coordinator.async_setup()
@@ -88,7 +91,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Turning the sidebar option on or off needs no reload, only the sidebar item to follow it.
     entry.async_on_unload(entry.add_update_listener(_options_updated))
 
-    async_register_services(hass)
     _schedule_holiday_sync(hass, entry)
     if hass.state == CoreState.running:
         # A no-op after the first time in a run; it re-adds the card if the last entry was removed.
@@ -97,7 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-def _schedule_holiday_sync(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def _schedule_holiday_sync(hass: HomeAssistant, entry: CelebrightConfigEntry) -> None:
     """Keep the holiday events current: once now, then every few hours (rolls a passed window to next year)."""
 
     async def _sync(_now=None) -> None:
@@ -109,16 +111,14 @@ def _schedule_holiday_sync(hass: HomeAssistant, entry: ConfigEntry) -> None:
     entry.async_create_background_task(hass, get_engine(hass).async_start(), f"{DOMAIN} rules")
 
 
-async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _options_updated(hass: HomeAssistant, entry: CelebrightConfigEntry) -> None:
     await async_update_sidebar_panel(hass)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: CelebrightConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    # Last entry: remove the shared services. (The card and sidebar page stay: a reload, e.g.
-    # after re-authentication, unloads the only entry too, and nothing would put them back.)
-    if len(hass.config_entries.async_entries(DOMAIN)) <= 1:
-        async_unregister_services(hass)
+    # The services, card and sidebar page stay: a reload, e.g. after re-authentication, unloads
+    # the only entry too, and nothing would put them back.
     # A disabled entry stops asking for the sidebar page; a reloading one still does.
     await async_update_sidebar_panel(hass)
     return unloaded

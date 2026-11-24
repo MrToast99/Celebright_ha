@@ -1,5 +1,58 @@
 {
   "entity": {
+    "sensor": {
+      "current_display": {
+        "name": "Current Display"
+      },
+      "active_event": {
+        "name": "Active Event"
+      },
+      "next_event_start": {
+        "name": "Next Event Start"
+      },
+      "active_source": {
+        "name": "Active Source"
+      },
+      "model": {
+        "name": "Model"
+      },
+      "firmware": {
+        "name": "Firmware"
+      },
+      "hw_version": {
+        "name": "Hardware Version"
+      },
+      "led_count": {
+        "name": "LED Count"
+      },
+      "bulb_type": {
+        "name": "Bulb Type"
+      },
+      "color_order": {
+        "name": "Color Order"
+      },
+      "location": {
+        "name": "Location"
+      },
+      "scheduled_events": {
+        "name": "Scheduled Events"
+      }
+    },
+    "binary_sensor": {
+      "schedule": {
+        "name": "Schedule"
+      }
+    },
+    "button": {
+      "refresh_scenes": {
+        "name": "Refresh Scenes"
+      }
+    },
+    "switch": {
+      "schedule_enabled": {
+        "name": "Schedule Enabled"
+      }
+    },
     "select": {
       "scene": {
         "name": "Scene",

@@ -194,12 +194,15 @@ For a controller named **House**:
 | `switch.house_schedule_enabled` | Turn the built-in schedule on / off (firmware 2.x only) |
 | `binary_sensor.house_schedule` | Schedule on: the controller's flag, or "has scheduled events" on newer firmware |
 | `sensor.house_scheduled_events` | Event count; the decoded list is in the attributes (`events`) |
-| `sensor.house_model`, `_firmware`, `_hardware_version`, `_led_count`, `_bulb_type`, `_color_order`, `_location` | Device info (diagnostic) |
+| `sensor.house_firmware` | Firmware version (diagnostic) |
+| `sensor.house_model`, `_hardware_version`, `_led_count`, `_bulb_type`, `_color_order`, `_location` | Device info (diagnostic). **Off by default** on new installs, since the device page already shows the model and hardware; enable the ones you want under **Settings → Devices & services → Entities** |
 | `button.house_refresh_scenes` | Re-pull scenes and schedule from your account (config) |
 
 Replace `house` with your device's slug if it is named differently (see **Settings → Devices & Services → Entities**).
 
 **Holidays and rules are not entities or services** (yet). You set them on the Celebright page or cards. A holiday that is playing shows up as the active event: `sensor.house_active_event` reads `Holiday: Halloween`, so you can trigger automations on it.
+
+**Removing Celebright:** **Settings → Devices & services → Celebright → ⋮ → Delete**. That removes its devices, entities and sidebar item, and stops the rules and holiday updates; the events already on your controller keep running. Then delete the `celebright` folder from `custom_components` (or uninstall it in the Marketplace / HACS) and restart.
 
 **What Celebright stores in Home Assistant:** your holiday and rule settings, in `.storage/celebright_holidays` and `.storage/celebright_rules` of your config folder (included in Home Assistant backups). Removing the integration leaves them; delete the files to start over.
 
@@ -599,6 +602,7 @@ Event UUIDs are in the `sensor.<device>_scheduled_events` attributes. On v3 each
 |---|---|
 | **Invalid authentication** | Re-check the email/password in the Celebright app. |
 | **Re-authenticate** prompt | Your password changed; enter the new one. |
+| Reporting a bug | Attach the file from **Settings → Devices & services → Celebright → ⋮ → Download diagnostics**. It has no email, password, controller name or location. |
 | No **Celebright** item in the sidebar | Turn it on: **Settings → Devices & services → Celebright → Configure → Show Celebright in the sidebar** (installs from before 0.4.0 have it off). |
 | The card or page shows "Custom element doesn't exist" | See **The card isn't showing up?** under the card section. |
 | A holiday event keeps returning after I delete it in the app | Holidays are managed in Home Assistant; switch the holiday off on the **Holidays** tab instead. |

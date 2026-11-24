@@ -8,21 +8,24 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import CelebrightCommandError, CelebrightConnectionError
-from .coordinator import CelebrightCoordinator
+from .coordinator import CelebrightConfigEntry, CelebrightCoordinator
 from .entity import CelebrightEntity
 
 _OPTION_OFF = "Off"
 
 
+# Commands go one at a time to the controller through the cloud.
+PARALLEL_UPDATES = 1
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CelebrightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: CelebrightCoordinator = entry.runtime_data
@@ -40,11 +43,6 @@ class CelebrightSceneSelect(CelebrightEntity, SelectEntity):
     def __init__(self, coordinator: CelebrightCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_scene"
-
-    @property
-    def name(self) -> str:
-        # has_entity_name=True: HA prepends the device name, so return only our part.
-        return "Scene"
 
     @property
     def options(self) -> list[str]:

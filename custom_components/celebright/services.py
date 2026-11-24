@@ -9,7 +9,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -110,11 +110,11 @@ def _parse_time(value: str) -> int:
             h, m = v.split(":")
             return int(h) * 3600 + int(m) * 60
         except ValueError as err:
-            raise HomeAssistantError(f"Invalid time '{value}' (use HH:MM, sunset, sunrise, midnight)") from err
+            raise ServiceValidationError(f"Invalid time '{value}' (use HH:MM, sunset, sunrise, midnight)") from err
     # Allow raw seconds
     if v.lstrip("-").isdigit():
         return int(v)
-    raise HomeAssistantError(f"Invalid time '{value}' (use HH:MM, sunset, sunrise, or midnight)")
+    raise ServiceValidationError(f"Invalid time '{value}' (use HH:MM, sunset, sunrise, or midnight)")
 
 
 def _parse_date(hass: HomeAssistant, value: str) -> int:
@@ -125,7 +125,7 @@ def _parse_date(hass: HomeAssistant, value: str) -> int:
     try:
         d = datetime.strptime(v, "%Y-%m-%d")
     except ValueError as err:
-        raise HomeAssistantError(f"Invalid date '{value}' (use YYYY-MM-DD)") from err
+        raise ServiceValidationError(f"Invalid date '{value}' (use YYYY-MM-DD)") from err
     local = dt_util.start_of_local_day(d)
     return int(local.timestamp())
 
@@ -137,19 +137,19 @@ def _find_coordinator(hass: HomeAssistant, device_id: str | None) -> tuple[Celeb
         e.runtime_data for e in entries if getattr(e, "runtime_data", None)
     ]
     if not coordinators:
-        raise HomeAssistantError("No Celebright integration is loaded")
+        raise ServiceValidationError("No Celebright integration is loaded")
 
     if device_id:
         for coord in coordinators:
             if device_id in coord.device_infos:
                 return coord, device_id
-        raise HomeAssistantError(f"Unknown Celebright device_id '{device_id}'")
+        raise ServiceValidationError(f"Unknown Celebright device_id '{device_id}'")
 
     # No device specified — only valid if there is exactly one device total
     all_pairs = [(c, d) for c in coordinators for d in c.device_infos]
     if len(all_pairs) == 1:
         return all_pairs[0]
-    raise HomeAssistantError(
+    raise ServiceValidationError(
         "Multiple Celebright devices found; specify 'device_id' "
         f"(one of: {[d for _, d in all_pairs]})"
     )
@@ -161,7 +161,7 @@ def _resolve_scene_uuid(coord: CelebrightCoordinator, device_id: str, scene: str
         scene_uuid = scene
     if not scene_uuid:
         names = [s.name for s in coord.scenes.get(device_id, [])]
-        raise HomeAssistantError(
+        raise ServiceValidationError(
             f"Scene '{scene}' not found for device {device_id}. Available: {names}"
         )
     return scene_uuid
@@ -170,7 +170,7 @@ def _resolve_scene_uuid(coord: CelebrightCoordinator, device_id: str, scene: str
 def _build_event_kwargs(hass: HomeAssistant, coord, device_id: str, data: dict) -> dict:
     by_day = data.get("by_day")
     if by_day and by_day.upper() not in _WEEKDAYS:
-        raise HomeAssistantError(f"by_day must be one of {sorted(_WEEKDAYS)}")
+        raise ServiceValidationError(f"by_day must be one of {sorted(_WEEKDAYS)}")
     repeat_until = data.get("repeat_until")
     scene_uuid = _resolve_scene_uuid(coord, device_id, data["scene"])
     start_date = _parse_date(hass, data["start_date"])
@@ -242,11 +242,11 @@ def _resolve_event_uuid(coord, device_id: str, data: dict) -> str:
         if not uuid:
             info = coord.device_infos.get(device_id)
             existing = [e.name for e in info.events] if info else []
-            raise HomeAssistantError(
+            raise ServiceValidationError(
                 f"No event named '{name}' on device {device_id}. Existing: {existing}"
             )
         return uuid
-    raise HomeAssistantError("Provide either 'event_uuid' or 'event_name'")
+    raise ServiceValidationError("Provide either 'event_uuid' or 'event_name'")
 
 
 def _read_dashboard_template() -> str:
@@ -266,7 +266,7 @@ async def _run(coro):
 
 
 def async_register_services(hass: HomeAssistant) -> None:
-    """Register Celebright services once."""
+    """Register Celebright services. Called once from async_setup, so they exist even while no entry is loaded."""
     if hass.services.has_service(DOMAIN, SERVICE_CREATE_EVENT):
         return
 
@@ -350,16 +350,3 @@ def async_register_services(hass: HomeAssistant) -> None:
         schema=GENERATE_DASHBOARD_SCHEMA, supports_response=SupportsResponse.OPTIONAL,
     )
 
-
-def async_unregister_services(hass: HomeAssistant) -> None:
-    """Remove services when the last entry unloads."""
-    if not hass.config_entries.async_entries(DOMAIN):
-        for svc in (
-            SERVICE_CREATE_EVENT,
-            SERVICE_UPDATE_EVENT,
-            SERVICE_DELETE_EVENT,
-            SERVICE_SET_EVENT_ENABLED,
-            SERVICE_REFRESH_SCENES,
-            SERVICE_GENERATE_DASHBOARD,
-        ):
-            hass.services.async_remove(DOMAIN, svc)

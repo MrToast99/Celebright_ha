@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.scene import Scene
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -19,7 +18,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import CelebrightCommandError, CelebrightConnectionError
 from .const import DOMAIN
-from .coordinator import CelebrightCoordinator
+from .coordinator import CelebrightConfigEntry, CelebrightCoordinator
 from .entity import CelebrightEntity
 
 
@@ -37,7 +36,7 @@ def _device_name(coordinator: CelebrightCoordinator, device_id: str) -> str:
 
 
 def _register_devices(
-    devices: dr.DeviceRegistry, entry: ConfigEntry, coordinator: CelebrightCoordinator, device_id: str
+    devices: dr.DeviceRegistry, entry: CelebrightConfigEntry, coordinator: CelebrightCoordinator, device_id: str
 ) -> None:
     """Create the controller's device, then the "<device> Scenes" sub-device linked to it."""
     name = _device_name(coordinator, device_id)
@@ -60,9 +59,13 @@ def _register_devices(
         devices.async_get_or_create(**sub, via_device=(DOMAIN, device_id))
 
 
+# Commands go one at a time to the controller through the cloud.
+PARALLEL_UPDATES = 1
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CelebrightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: CelebrightCoordinator = entry.runtime_data
@@ -101,7 +104,7 @@ async def async_setup_entry(
 class CelebrightScene(CelebrightEntity, Scene):
     """A saved scene on the controller."""
 
-    _attr_icon = "mdi:string-lights"
+    _attr_translation_key = "saved_scene"   # for the icon; the name is the scene's own
     _attr_has_entity_name = False
 
     def __init__(self, coordinator: CelebrightCoordinator, device_id: str, scene_uuid: str) -> None:

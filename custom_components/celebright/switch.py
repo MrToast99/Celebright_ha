@@ -4,22 +4,25 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import CelebrightCommandError, CelebrightConnectionError, uses_v3_firmware
 from .const import DOMAIN
-from .coordinator import CelebrightCoordinator
+from .coordinator import CelebrightConfigEntry, CelebrightCoordinator
 from .entity import CelebrightEntity
 
 _LOGGER = logging.getLogger(__name__)
 
 
+# Commands go one at a time to the controller through the cloud.
+PARALLEL_UPDATES = 1
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CelebrightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: CelebrightCoordinator = entry.runtime_data
@@ -42,15 +45,11 @@ async def async_setup_entry(
 class CelebrightScheduleSwitch(CelebrightEntity, SwitchEntity):
     """On = the on-device schedule runs; off = it is disabled."""
 
-    _attr_icon = "mdi:calendar-check"
+    _attr_translation_key = "schedule_enabled"
 
     def __init__(self, coordinator: CelebrightCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_schedule_switch"
-
-    @property
-    def name(self) -> str:
-        return "Schedule Enabled"
 
     @property
     def is_on(self) -> bool | None:

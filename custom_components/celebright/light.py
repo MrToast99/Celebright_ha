@@ -14,12 +14,11 @@ from homeassistant.components.light import (
     LightEntity,
     LightEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import CelebrightCommandError, CelebrightConnectionError
-from .coordinator import CelebrightCoordinator
+from .coordinator import CelebrightConfigEntry, CelebrightCoordinator
 from .entity import CelebrightEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,9 +43,13 @@ def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     )
 
 
+# Commands go one at a time to the controller through the cloud.
+PARALLEL_UPDATES = 1
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CelebrightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: CelebrightCoordinator = entry.runtime_data
@@ -59,6 +62,7 @@ async def async_setup_entry(
 class CelebrightLight(CelebrightEntity, LightEntity):
     """One Celebright CLC controller — on/off + RGB + brightness."""
 
+    _attr_name = None   # the light is the device itself, so it takes the device's name
     _attr_color_mode = ColorMode.RGB
     _attr_supported_color_modes = {ColorMode.RGB}
     _attr_supported_features = LightEntityFeature(0)

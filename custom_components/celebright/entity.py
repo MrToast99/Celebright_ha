@@ -53,11 +53,6 @@ class CelebrightEntity(CoordinatorEntity[CelebrightCoordinator]):
         return self.coordinator.data.get(self._device_id)
 
     @property
-    def name(self) -> str | None:
-        # None = use the device name (the light); sub-entities return their own name.
-        return None
-
-    @property
     def available(self) -> bool:
         state = self._device_state
         return state is not None and state.available and super().available

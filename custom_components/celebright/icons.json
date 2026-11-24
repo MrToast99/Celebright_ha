@@ -1,0 +1,62 @@
+{
+  "entity": {
+    "sensor": {
+      "current_display": {
+        "default": "mdi:television-play"
+      },
+      "active_event": {
+        "default": "mdi:calendar-star"
+      },
+      "next_event_start": {
+        "default": "mdi:calendar-arrow-right"
+      },
+      "active_source": {
+        "default": "mdi:source-branch"
+      },
+      "model": {
+        "default": "mdi:information-outline"
+      },
+      "firmware": {
+        "default": "mdi:chip"
+      },
+      "hw_version": {
+        "default": "mdi:developer-board"
+      },
+      "led_count": {
+        "default": "mdi:led-strip-variant"
+      },
+      "bulb_type": {
+        "default": "mdi:lightbulb-cfl"
+      },
+      "color_order": {
+        "default": "mdi:palette"
+      },
+      "location": {
+        "default": "mdi:map-marker"
+      },
+      "scheduled_events": {
+        "default": "mdi:calendar-multiple"
+      }
+    },
+    "binary_sensor": {
+      "schedule": {
+        "default": "mdi:calendar-clock"
+      }
+    },
+    "button": {
+      "refresh_scenes": {
+        "default": "mdi:refresh"
+      }
+    },
+    "switch": {
+      "schedule_enabled": {
+        "default": "mdi:calendar-check"
+      }
+    },
+    "scene": {
+      "saved_scene": {
+        "default": "mdi:string-lights"
+      }
+    }
+  }
+}

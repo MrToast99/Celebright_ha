@@ -5,17 +5,20 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .coordinator import CelebrightCoordinator
+from .coordinator import CelebrightConfigEntry, CelebrightCoordinator
 from .entity import CelebrightEntity
+
+
+# Updates come from the coordinator, so entities never poll on their own.
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: CelebrightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: CelebrightCoordinator = entry.runtime_data
@@ -29,15 +32,11 @@ class CelebrightScheduleBinarySensor(CelebrightEntity, BinarySensorEntity):
     """On when the device's built-in lighting schedule is enabled."""
 
     _attr_device_class = BinarySensorDeviceClass.RUNNING
-    _attr_icon = "mdi:calendar-clock"
+    _attr_translation_key = "schedule"
 
     def __init__(self, coordinator: CelebrightCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_schedule_enabled"
-
-    @property
-    def name(self) -> str:
-        return "Schedule"
 
     @property
     def is_on(self) -> bool | None:
