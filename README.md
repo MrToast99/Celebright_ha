@@ -2,7 +2,7 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration for **Celebright** permanent / architectural LED lighting (CLC-series controllers). Control your lights, pick saved scenes (with colour previews), manage the built-in schedule and your holidays, react to things like the aurora, and automate it all from Home Assistant, with a graphical page of its own in the sidebar.
 
-> **Status:** `0.4.1`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
+> **Status:** `0.4.2`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
 
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/latest/total)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/total?label=downloads%40total)
@@ -161,7 +161,7 @@ Copy `custom_components/celebright` into your config folder (`<config>/custom_co
 
 ### Upgrading from 0.3.3?
 
-Read the **migration guide** in the 0.4.0 entry of the [changelog](CHANGELOG.md). It is short: update, restart, refresh the browser. Version 0.4.1 includes everything in 0.4.0.
+Read the **migration guide** in the 0.4.0 entry of the [changelog](CHANGELOG.md). It is short: update, restart, refresh the browser. Later versions include everything in 0.4.0.
 <!-- ha-marketplace:exclude-end -->
 
 ---

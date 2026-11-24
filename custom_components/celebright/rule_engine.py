@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from homeassistant.core import Event, HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -174,7 +174,10 @@ class RuleEngine:
                 entities.add(rule["when"]["entity_id"])
         self._entity_unsub = async_track_state_change_event(self.hass, sorted(entities), self._on_state)
 
+    @callback
     def _on_state(self, event: Event) -> None:
+        # @callback keeps this on the event loop. Without it Home Assistant runs a plain
+        # function in a worker thread, where async_create_task is not allowed.
         self.hass.async_create_task(self.async_evaluate(), "celebright rules", eager_start=False)
 
     async def _on_tick(self, _now: datetime) -> None:
