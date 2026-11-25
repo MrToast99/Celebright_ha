@@ -4,7 +4,7 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
-## [0.5.0] - Pending
+## [0.5.0] - 2026-11-24
 
 ### Added
 - **Playlists tab** for controllers on firmware 3.x. A playlist cycles through several of your scenes. Click one to play it with a time per scene, **Shuffle** and an optional **turn-off timer**; make, reorder and delete playlists too. The tab appears on the sidebar page only for a controller that supports playlists, and there is a new card, `custom:celebright-playlists-card`, for your own dashboards. The generated dashboard gets a **Playlists** view for such a controller.
