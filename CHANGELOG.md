@@ -4,7 +4,7 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
-## [0.4.2] - Pending
+## [0.4.2] - 2026-11-24
 
 ### Fixed
 - **Home Assistant logged "calls hass.async_create_task from a thread other than the event loop" for the rules engine.** The handler that reacts to a sensor or switch changing was not marked as running on the event loop, so Home Assistant ran it in a worker thread. It now runs on the loop. The warning was the only symptom seen, but Home Assistant warns that this can corrupt data, so update. **To update:** update, restart Home Assistant. Nothing else to do.
