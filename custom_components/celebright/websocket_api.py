@@ -114,6 +114,13 @@ async def ws_holiday_set(manager, msg: dict):
     )
 
 
+@_admin_write({vol.Required("type"): "celebright/holidays_sync"})
+async def ws_holidays_sync(manager, msg: dict):
+    """Check now whether any holiday event has finished and needs moving to next year (also at startup and every 30 minutes)."""
+    await manager.async_sync_all()
+    return {}
+
+
 @_admin_write({
     vol.Required("type"): "celebright/holiday_custom_save",
     vol.Required("device_id"): str,
@@ -251,7 +258,7 @@ async def ws_playlist_delete(hass, msg: dict):
 
 @callback
 def async_register_websocket(hass: HomeAssistant) -> None:
-    for command in (ws_card_info, ws_holidays, ws_holiday_set, ws_holiday_custom_save, ws_holiday_custom_remove,
+    for command in (ws_card_info, ws_holidays, ws_holidays_sync, ws_holiday_set, ws_holiday_custom_save, ws_holiday_custom_remove,
                     ws_rules, ws_rule_save, ws_rule_delete, ws_rule_move,
                     ws_playlist_play, ws_playlist_save, ws_playlist_delete):
         websocket_api.async_register_command(hass, command)

@@ -774,10 +774,19 @@ class CelebrightCloudAPI(CelebrightAPIBase):
             if found.get("md5") == ev["md5"]:
                 return True
             # On the last look accept the same event stored with other normalisation.
-            return last_try and all(
+            if last_try and all(
                 found.get(k) == ev.get(k)
                 for k in ("event_name", "saved_scene_uuid", "playlist_uuid", "recurrence_rule", "start_date")
-            )
+            ):
+                changed = [
+                    f"{k}: sent {ev.get(k)!r}, stored {found.get(k)!r}"
+                    for k in ("start_anchor_type", "start_time", "end_anchor_type", "end_time", "end_date", "enabled")
+                    if found.get(k) != ev.get(k) and not (k.endswith("_time") and str(found.get(k) or "")[:5] == str(ev.get(k) or "")[:5])
+                ]
+                if changed:
+                    _LOGGER.warning("Event '%s' is stored differently from what was sent (%s)", ev["event_name"], "; ".join(changed))
+                return True
+            return False
 
         if not await self._wait_for_event(device_id, ev["uuid"], stored):
             raise CelebrightCommandError(

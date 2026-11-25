@@ -2,9 +2,14 @@
 
 Settings (a scene per holiday, extra days, custom holidays) live in Home Assistant's storage.
 Each enabled holiday is ONE controller event named "Holiday: <name>" that holds the next
-occurrence's dates (see holidays.py). A sync creates it, moves it to the following year once
-its window has passed, or deletes it when the holiday is switched off. Only events this
-manager created are ever changed or deleted; the user's own events are never touched.
+occurrence's dates (see holidays.py).
+
+Saving a holiday in the card applies its settings to the event at once. After that, the
+periodic check (at startup and every 30 minutes) leaves an event alone, whatever was changed
+in it (times, scene, ...), and only does two things: creates the event if it is missing, and,
+once the event has finished, moves the SAME event to next year's dates with everything else
+as it is. Switching a holiday off deletes its event. Only events this manager created are
+ever changed or deleted; the user's own events are never touched.
 """
 from __future__ import annotations
 
@@ -96,6 +101,7 @@ class HolidayManager:
                 "id": holiday.id, "name": holiday.name, "info": holiday.info, "custom": holiday.custom,
                 "scene": st.get("scene"), "playlist": st.get("playlist"),
                 "seconds": st.get("seconds") or 30, "shuffle": bool(st.get("shuffle")),
+                "times": self._times_shown(device_id, holiday, dev),
                 "enabled": bool(st.get("enabled")), "before": before, "after": after,
                 "next": {"start": start.isoformat(), "end": end.isoformat()},
                 "status": self._status.get((device_id, holiday.id)) or {"state": "off" if not st.get("enabled") else "pending", "message": ""},
@@ -137,7 +143,7 @@ class HolidayManager:
                 "before": hol.clamp_adjust(before), "after": hol.clamp_adjust(after),
             }
             await self._save()
-            await self._sync_one(coord, device_id, holiday)
+            await self._sync_one(coord, device_id, holiday, apply=True)
         return next(r for r in self.view(device_id) if r["id"] == holiday_id)
 
     async def async_save_custom(self, device_id: str, *, holiday_id: str | None, name: str, start: str, end: str) -> str:
@@ -155,7 +161,7 @@ class HolidayManager:
             await self._save()
             # A renamed holiday has a new event name: sync moves the existing event (same uuid).
             coord, _ = self._find(device_id)
-            await self._sync_one(coord, device_id, self._holiday(device_id, spec["id"]))
+            await self._sync_one(coord, device_id, self._holiday(device_id, spec["id"]), apply=True)
         return spec["id"]
 
     async def async_remove_custom(self, device_id: str, holiday_id: str) -> None:
@@ -188,10 +194,10 @@ class HolidayManager:
 
     # ---- the sync of one holiday -----------------------------------------
 
-    async def _sync_one(self, coord: Any, device_id: str, holiday: hol.Holiday) -> None:
+    async def _sync_one(self, coord: Any, device_id: str, holiday: hol.Holiday, apply: bool = False) -> None:
         key = (device_id, holiday.id)
         try:
-            self._status[key] = await self._sync(coord, device_id, holiday)
+            self._status[key] = await self._sync(coord, device_id, holiday, apply)
         except (CelebrightError, HomeAssistantError) as err:
             _LOGGER.warning("Holiday %r on %s: %s", holiday.name, device_id, err)
             self._status[key] = {"state": "error", "message": str(err)}
@@ -208,7 +214,92 @@ class HolidayManager:
         # Lost the record: adopt an event that has exactly our name (no duplicate is created).
         return next((e for e in events if e.name == hol.event_name(holiday)), None)
 
-    async def _sync(self, coord: Any, device_id: str, holiday: hol.Holiday) -> dict[str, str]:
+    @staticmethod
+    def _times(holiday: hol.Holiday, existing: Any) -> tuple[tuple, int | None]:
+        """The times (start, end, start offset, end offset) and night length to give the event.
+
+        A new event gets the holiday's default (sunset to sunrise). An existing one always keeps
+        the times it has on the controller, so what the user set (in the Celebright app or the
+        Control tab) is never overwritten, and moving it to next year's dates leaves them alone.
+        """
+        default = (holiday.times[0], holiday.times[1], 0, 0)
+        form = event_form(existing.raw, _local_date) if existing is not None else None
+        if not form:
+            return default, None
+        current = (
+            form.get("start_time"), form.get("end_time"),
+            int(form.get("start_offset_minutes") or 0), int(form.get("end_offset_minutes") or 0),
+        )
+        try:
+            nights = (date.fromisoformat(form["end_date"]) - date.fromisoformat(form["start_date"])).days
+        except (KeyError, TypeError, ValueError):
+            nights = None
+        return current, nights if nights in (0, 1) else None
+
+    def _times_shown(self, device_id: str, holiday: hol.Holiday, dev: dict[str, Any]) -> list[str]:
+        """The start and end the card shows: those of the event on the controller, else the default."""
+        try:
+            coord, _ = self._find(device_id)
+            existing = self._event_for(coord, device_id, holiday, dev["managed"].get(holiday.id)) if dev["holidays"].get(holiday.id, {}).get("enabled") else None
+        except HomeAssistantError:
+            existing = None
+        form = event_form(existing.raw, _local_date) if existing is not None else None
+        if form and form.get("start_time") and form.get("end_time"):
+            return [form["start_time"], form["end_time"]]
+        return [*holiday.times]
+
+    @staticmethod
+    def _span_text(form: dict[str, Any] | None) -> str:
+        try:
+            start = date.fromisoformat(form["start_date"])
+            end = date.fromisoformat(form["repeat_until"])
+        except (KeyError, TypeError, ValueError):
+            return ""
+        return f"{start:%b} {start.day} – {end:%b} {end.day}, {end.year}"
+
+    async def _keep_or_roll(self, coord: Any, device_id: str, holiday: hol.Holiday, st: dict[str, Any],
+                            existing: Any, dev: dict[str, Any]) -> dict[str, str]:
+        """The periodic check of an event that exists: leave it alone, or, once finished, move it to next year."""
+        from .services import _build_event_kwargs  # late: services imports a lot of Home Assistant
+
+        dev["managed"][holiday.id] = existing.uuid
+        await self._save()
+        form = event_form(existing.raw, _local_date)
+        try:
+            last_night = date.fromisoformat(form["repeat_until"])
+        except (KeyError, TypeError, ValueError):
+            last_night = None
+        today = dt_util.now().date()
+        if last_night is None or last_night >= today:
+            return {"state": "ok", "message": self._span_text(form)}
+
+        # Finished, and the holiday is still switched on (so it repeats): next year's dates, nothing else changed.
+        raw = existing.raw if isinstance(existing.raw, dict) else {}
+        playlist = None
+        if raw.get("playlist_uuid"):
+            if raw["playlist_uuid"] not in {p.uuid for p in getattr(coord, "playlists", {}).get(device_id, [])}:
+                return {"state": "error", "message": "The playlist this holiday plays no longer exists. Pick another."}
+            playlist = {
+                "uuid": raw["playlist_uuid"],
+                "seconds": raw.get("playlist_scene_display_duration_seconds") or 30,
+                "shuffle": bool(raw.get("playlist_randomize")),
+            }
+        elif existing.scene_uuid not in {s.uuid for s in coord.scenes.get(device_id, [])}:
+            return {"state": "error", "message": "The scene this holiday plays no longer exists. Pick another."}
+        span = hol.next_window(holiday, today, hol.clamp_adjust(st.get("before")), hol.clamp_adjust(st.get("after")))
+        times, nights_long = self._times(holiday, existing)
+        fields = hol.event_fields(holiday, span, existing.scene_uuid, enabled=existing.enabled, playlist=playlist,
+                                  times=times, nights_long=nights_long)
+        fields["name"], fields["priority"] = existing.name, existing.priority
+        if playlist:
+            fields["play_once"] = bool(raw.get("playlist_once_per_event"))
+        _LOGGER.info("Holiday %r on %s: its last night (%s) has passed; moving the event to %s – %s",
+                     holiday.name, device_id, last_night, span[0], span[1])
+        kwargs = _build_event_kwargs(self.hass, coord, device_id, {"interval": 1, **fields})
+        await coord.async_create_event(device_id, event_uuid=existing.uuid, **kwargs)
+        return {"state": "ok", "message": f"{span[0]:%b} {span[0].day} – {span[1]:%b} {span[1].day}, {span[1].year}"}
+
+    async def _sync(self, coord: Any, device_id: str, holiday: hol.Holiday, apply: bool = False) -> dict[str, str]:
         from .services import _build_event_kwargs  # late: services imports a lot of Home Assistant
 
         dev = self._device(device_id)
@@ -223,6 +314,9 @@ class HolidayManager:
             await self._save()
             return {"state": "off", "message": ""}
 
+        if existing is not None and not apply:
+            return await self._keep_or_roll(coord, device_id, holiday, st, existing, dev)
+
         playlist = None
         if st.get("playlist"):
             if st["playlist"] not in {p.uuid for p in getattr(coord, "playlists", {}).get(device_id, [])}:
@@ -233,13 +327,18 @@ class HolidayManager:
 
         today = dt_util.now().date()
         span = hol.next_window(holiday, today, hol.clamp_adjust(st.get("before")), hol.clamp_adjust(st.get("after")))
-        fields = hol.event_fields(holiday, span, st.get("scene"), playlist=playlist)
+        times, nights_long = self._times(holiday, existing)
+        fields = hol.event_fields(holiday, span, st.get("scene"), playlist=playlist, times=times, nights_long=nights_long)
         message = f"{span[0]:%b} {span[0].day} – {span[1]:%b} {span[1].day}, {span[1].year}"
 
-        if existing is not None and self._matches(existing, fields):
-            managed[holiday.id] = existing.uuid
-            await self._save()
-            return {"state": "ok", "message": message}
+        if existing is not None:
+            differences = self._differences(existing, fields)
+            if not differences:
+                managed[holiday.id] = existing.uuid
+                await self._save()
+                return {"state": "ok", "message": message}
+            # A saved holiday: bring the event in line with what was just chosen.
+            _LOGGER.info("Holiday %r on %s: updating the event (%s)", holiday.name, device_id, "; ".join(differences))
 
         data = {"priority": fields["priority"], "interval": 1, **fields}
         kwargs = _build_event_kwargs(self.hass, coord, device_id, data)
@@ -259,9 +358,14 @@ class HolidayManager:
     @staticmethod
     def _matches(event: Any, fields: dict[str, Any]) -> bool:
         """Whether the controller's event already is exactly what the settings call for."""
+        return not HolidayManager._differences(event, fields)
+
+    @staticmethod
+    def _differences(event: Any, fields: dict[str, Any]) -> list[str]:
+        """What differs between the controller's event and the settings, as 'field: has X, wants Y' (empty = same)."""
         form = event_form(event.raw, _local_date)
         if not form:
-            return False
+            return ["its dates can't be read"]
         raw = event.raw if isinstance(event.raw, dict) else {}
         if "playlist" in fields:
             same_content = (
@@ -272,14 +376,24 @@ class HolidayManager:
             )
         else:
             same_content = event.scene_uuid == fields["scene"] and not raw.get("playlist_uuid")
-        return (
-            same_content
-            and event.priority == fields["priority"]
-            and event.name == fields["name"]
-            and event.enabled
-            and form.get("frequency") == 1
-            and all(form.get(k) == fields[k] for k in ("start_date", "end_date", "start_time", "end_time", "repeat_until"))
-        )
+        found: list[str] = []
+        if not same_content:
+            found.append("what it plays")
+        if event.priority != fields["priority"]:
+            found.append(f"priority: has {event.priority}, wants {fields['priority']}")
+        if event.name != fields["name"]:
+            found.append(f"name: has {event.name!r}, wants {fields['name']!r}")
+        if not event.enabled:
+            found.append("it is switched off")
+        if form.get("frequency") != 1:
+            found.append("it doesn't repeat daily")
+        for key in ("start_date", "end_date", "start_time", "end_time", "repeat_until"):
+            if form.get(key) != fields[key]:
+                found.append(f"{key}: has {form.get(key)!r}, wants {fields[key]!r}")
+        for key in ("start_offset_minutes", "end_offset_minutes"):
+            if int(form.get(key) or 0) != int(fields.get(key) or 0):
+                found.append(f"{key}: has {int(form.get(key) or 0)}, wants {int(fields.get(key) or 0)}")
+        return found
 
 
 _KEY = "_holiday_manager"

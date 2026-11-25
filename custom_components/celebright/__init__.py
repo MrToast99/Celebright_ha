@@ -100,12 +100,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: CelebrightConfigEntry) -
 
 
 def _schedule_holiday_sync(hass: HomeAssistant, entry: CelebrightConfigEntry) -> None:
-    """Keep the holiday events current: once now, then every few hours (rolls a passed window to next year)."""
+    """Keep the holiday events current: once now, then every half hour (rolls a passed window to next year,
+    and puts right an event that was changed outside Home Assistant). A check that finds nothing to do costs no network call."""
 
     async def _sync(_now=None) -> None:
         await get_manager(hass).async_sync_all()
 
-    entry.async_on_unload(async_track_time_interval(hass, _sync, timedelta(hours=6)))
+    entry.async_on_unload(async_track_time_interval(hass, _sync, timedelta(minutes=30)))
     entry.async_create_background_task(hass, _sync(), f"{DOMAIN} holiday sync")
     # Lighting rules (aurora and the like): watch Home Assistant from now until the last entry goes.
     entry.async_create_background_task(hass, get_engine(hass).async_start(), f"{DOMAIN} rules")

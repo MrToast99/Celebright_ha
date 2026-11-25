@@ -2,9 +2,10 @@
 
 The controller's own yearly repeat rules are unreliable for a holiday that moves, or for a
 window that starts before the holiday and ends after it. So each holiday is kept as ONE
-ordinary event that holds the *next* occurrence's real dates (daily, until the last night). When
-that window has passed, the same event is updated in place to the following year's dates
-(see holiday_manager.py). The controller then only ever plays a plain dated event.
+ordinary event that holds the *next* occurrence's real dates (daily, until the last night). Once
+that window has passed, the same event is moved in place to the following year's dates, and
+nothing else about it is changed (see holiday_manager.py). The controller then only ever plays
+a plain dated event.
 
 A holiday's window is one of:
   week   the Monday-Sunday week containing the holiday's date
@@ -35,9 +36,9 @@ class Holiday:
     start: Rule                    # the holiday's date, or a range's first day
     end: Rule | None = None        # a range's last day
     priority: int = 3
-    # Start and end of each night. Nights run from sunset to midnight (a holiday applies by
-    # calendar date); the controller's own schedule takes over after that.
-    times: tuple[str, str] = ("sunset", "00:00")
+    # Start and end of each night: the default for a new holiday event. An event's times can be
+    # changed afterwards (in the Celebright app, or the Control tab); those are then kept.
+    times: tuple[str, str] = ("sunset", "sunrise")
     overnight: bool = True         # each night ends on the next date
     info: str = ""
     custom: bool = False
@@ -124,25 +125,36 @@ def event_fields(
     scene_uuid: str | None,
     enabled: bool = True,
     playlist: dict[str, Any] | None = None,
+    times: tuple[str, str, int, int] | None = None,
+    nights_long: int | None = None,
 ) -> dict[str, Any]:
     """The event as create_event / update_event fields: nightly until the last night.
 
-    It shows a scene, or a playlist (`{"uuid", "seconds", "shuffle"}`) instead.
+    It shows a scene, or a playlist (`{"uuid", "seconds", "shuffle"}`) instead. `times` is
+    (start, end, start offset, end offset in minutes) to keep, instead of the holiday's default;
+    `nights_long` is how many dates a night spans (0 or 1).
     """
     start, end = span
+    start_time, end_time, start_offset, end_offset = times or (holiday.times[0], holiday.times[1], 0, 0)
+    if nights_long is None:
+        nights_long = 1 if holiday.overnight else 0
     fields = {
         "name": event_name(holiday),
         "start_date": start.isoformat(),
-        # A night that ends at midnight (or at sunrise) ends on the next date.
-        "end_date": (start + timedelta(days=1) if holiday.overnight else start).isoformat(),
-        "start_time": holiday.times[0],
-        "end_time": holiday.times[1],
+        # A night that ends after midnight (at sunrise, say) ends on the next date.
+        "end_date": (start + timedelta(days=nights_long)).isoformat(),
+        "start_time": start_time,
+        "end_time": end_time,
         "priority": holiday.priority,
         "frequency": 1,
         "interval": 1,
         "repeat_until": end.isoformat(),
         "enabled": enabled,
     }
+    if start_offset:
+        fields["start_offset_minutes"] = start_offset
+    if end_offset:
+        fields["end_offset_minutes"] = end_offset
     if playlist:
         fields.update(playlist=playlist["uuid"], seconds_per_scene=playlist["seconds"], shuffle=playlist["shuffle"])
     else:

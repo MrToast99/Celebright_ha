@@ -19,7 +19,7 @@
  * events each controller has, then reads live state from Home Assistant.
  */
 
-const CARD_VERSION = "1.9.3";
+const CARD_VERSION = "1.9.6";
 
 const EN = {
   loading: "Loading…",
@@ -64,6 +64,7 @@ const EN = {
   starts: "Starts",
   ends: "Ends",
   sunset: "Sunset",
+  midnight: "Midnight",
   sunrise: "Sunrise",
   atTime: "At a time",
   offset: "Minutes after sunset or sunrise; negative is before.",
@@ -1098,7 +1099,7 @@ class CelebrightAutomationsCard extends HTMLElement {
 Object.assign(EN, {
   holidays: "Holidays",
   holRefresh: "Refresh",
-  holIntro: "Each holiday is one event on your controller, so it keeps running if Home Assistant is offline. Home Assistant checks every few hours and at startup, and moves it to next year's dates once the holiday has passed.",
+  holIntro: "Each holiday is one event on your controller, so it keeps running if Home Assistant is offline. Home Assistant checks every half hour and at startup, and moves it to next year's dates once the holiday has passed.",
   holNext: "Next",
   holNoScene: "Choose a scene",
   holOn: "On",
@@ -1115,6 +1116,7 @@ Object.assign(EN, {
   holEnd: "Last day",
   holRemove: "Delete holiday",
   holPickScene: "Pick a scene first.",
+  holChecking: "Checking the holidays against the controller…",
   holPickPlaylist: "Pick a playlist first.",
   holKindScene: "A scene",
   holKindPlaylist: "A playlist",
@@ -1222,6 +1224,19 @@ class CelebrightHolidaysCard extends HTMLElement {
     return (want && list.find((d) => d.ha_device_id === want || d.device_id === want)) || list[0] || null;
   }
 
+  // The refresh button: have Home Assistant check each holiday against the controller now (administrators), then reload.
+  async _resync() {
+    if (this._admin && !this._syncing) {
+      this._syncing = true;
+      this._notice = t("holChecking");
+      this._paint();
+      try { await this._hass.callWS({ type: "celebright/holidays_sync" }); } catch (err) { /* the tiles show any error */ }
+      this._syncing = false;
+      this._notice = "";
+    }
+    this._load();
+  }
+
   async _load() {
     if (this._loading || !this._hass) return;
     this._loading = true;
@@ -1280,7 +1295,7 @@ class CelebrightHolidaysCard extends HTMLElement {
     const add = this._admin ? `<button class="hol add" data-act="hol-add"><ha-icon icon="mdi:plus"></ha-icon>${t("holAdd")}</button>` : "";
     const markup = `<div class="head"><div class="title">${t("holidays")}</div>
         <button class="icon" data-act="hol-reload" title="${t("holRefresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button></div>
-      <div class="muted">${t("holIntro")}</div>${conflict}
+      <div class="muted">${t("holIntro")}</div>${this._notice ? `<div class="notice">${esc(this._notice)}</div>` : ""}${conflict}
       ${this._admin ? "" : `<div class="muted">${t("holReadOnly")}</div>`}
       <div class="hols">${tiles}${add}</div>`;
     if (markup !== this._markup) {
@@ -1294,8 +1309,10 @@ class CelebrightHolidaysCard extends HTMLElement {
     const playlist = row.playlist ? (dev.playlists || []).find((p) => p.uuid === row.playlist) || null : null;
     const busy = this._busy.has(row.id);
     const status = row.status || {};
+    const nice = (x) => (x === "sunset" ? t("sunset") : x === "sunrise" ? t("sunrise") : x === "00:00" ? t("midnight") : x);
+    const when = row.times && row.times.length === 2 ? ` · ${nice(row.times[0])} → ${nice(row.times[1])}` : "";
     const sub = row.enabled
-      ? `${t("holNext")}: ${spanText(row.next.start, row.next.end, lang)}`
+      ? `${t("holNext")}: ${spanText(row.next.start, row.next.end, lang)}${when}`
       : row.info;
     return `<div class="hol ${row.enabled ? "on" : ""}" role="button" tabindex="0" data-act="hol-open" data-id="${esc(row.id)}">
       <div class="hol-head"><div class="name" title="${esc(row.name)}">${esc(row.name)}</div>
@@ -1319,7 +1336,7 @@ class CelebrightHolidaysCard extends HTMLElement {
     const dev = this._device();
     const id = el.dataset.id;
     switch (el.dataset.act) {
-      case "hol-reload": this._load(); break;
+      case "hol-reload": this._resync(); break;
       case "conflict-off":
         this._conflicts.forEach((eid) => this._hass.callService("automation", "turn_off", { entity_id: eid }));
         this._conflicts = [];
@@ -1501,6 +1518,7 @@ const HOL_CSS = `
   .hol .sub { font-size: 0.8rem; color: var(--secondary-text-color); }
   .hol-scene { display: grid; gap: 4px; font-size: 0.85rem; min-height: 32px; align-content: center; }
   .hol-scene .sname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary-text-color); font-size: 0.8rem; }
+  .notice { padding: 8px 12px; border-radius: 10px; font-size: 0.9rem; background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
   .hol.add { place-content: center; justify-items: center; color: var(--secondary-text-color); border-style: dashed; min-height: 110px; }
   .hol.add ha-icon { --mdc-icon-size: 28px; }
   .grid.pick { max-height: 260px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
