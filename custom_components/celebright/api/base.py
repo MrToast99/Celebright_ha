@@ -49,6 +49,16 @@ class SceneInfo:
 
 
 @dataclass
+class PlaylistInfo:
+    """One scene playlist (firmware 3.x): saved scenes the controller cycles through, in order."""
+    uuid: str
+    name: str
+    description: str | None = None
+    scene_uuids: list[str] = field(default_factory=list)
+    md5: str = ""
+
+
+@dataclass
 class DeviceState:
     """Device state merged from REST, AppSync and MQTT."""
     device_id: str

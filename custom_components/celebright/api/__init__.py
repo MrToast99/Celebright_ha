@@ -9,6 +9,7 @@ from .base import (
     DeviceInfo,
     DeviceState,
     EventInfo,
+    PlaylistInfo,
     SceneInfo,
     uses_v3_firmware,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "DeviceInfo",
     "DeviceState",
     "EventInfo",
+    "PlaylistInfo",
     "presign_mqtt_wss_url",
     "SceneInfo",
     "uses_v3_firmware",

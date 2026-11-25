@@ -15,6 +15,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .api import CelebrightError
+from .api.playlists import DEFAULT_SECONDS, MAX_SECONDS, MAX_SLEEP_MINUTES, MIN_SECONDS
+from .api.base import uses_v3_firmware
 from .api.events_v3 import build_rrule, code_to_anchor
 from .const import DOMAIN
 from .coordinator import CelebrightCoordinator
@@ -28,6 +30,7 @@ SERVICE_DELETE_EVENT = "delete_event"
 SERVICE_SET_EVENT_ENABLED = "set_event_enabled"
 SERVICE_REFRESH_SCENES = "refresh_scenes"
 SERVICE_GENERATE_DASHBOARD = "generate_dashboard"
+SERVICE_PLAY_PLAYLIST = "play_playlist"
 
 # Weekday codes accepted for by_day.
 _WEEKDAYS = {"MO", "TU", "WE", "TH", "FR", "SA", "SU"}
@@ -36,7 +39,14 @@ _WEEKDAYS = {"MO", "TU", "WE", "TH", "FR", "SA", "SU"}
 _EVENT_FIELDS = {
     vol.Optional("device_id"): cv.string,
     vol.Required("name"): cv.string,
-    vol.Required("scene"): cv.string,  # scene name or UUID
+    # A scene, or (firmware 3.x) a playlist: exactly one of them.
+    vol.Exclusive("scene", "event_content"): cv.string,  # scene name or UUID
+    vol.Exclusive("playlist", "event_content"): cv.string,  # playlist name or UUID
+    vol.Optional("seconds_per_scene", default=DEFAULT_SECONDS): vol.All(
+        vol.Coerce(int), vol.Range(min=MIN_SECONDS, max=MAX_SECONDS)
+    ),
+    vol.Optional("shuffle", default=False): cv.boolean,
+    vol.Optional("play_once", default=False): cv.boolean,
     vol.Required("start_date"): cv.string,  # "YYYY-MM-DD" or epoch int (as str)
     vol.Required("end_date"): cv.string,
     vol.Required("start_time"): cv.string,  # sunset|sunrise|midnight|HH:MM
@@ -75,6 +85,18 @@ GENERATE_DASHBOARD_SCHEMA = vol.Schema(
         vol.Optional("filename", default="celebright_dashboard.yaml"): vol.All(
             cv.string, vol.Match(r"^[A-Za-z0-9_.-]+\.ya?ml$")
         ),
+    }
+)
+
+PLAY_PLAYLIST_SCHEMA = vol.Schema(
+    {
+        vol.Optional("device_id"): cv.string,
+        vol.Required("playlist"): cv.string,   # playlist name or UUID
+        vol.Optional("seconds_per_scene", default=DEFAULT_SECONDS): vol.All(
+            vol.Coerce(int), vol.Range(min=MIN_SECONDS, max=MAX_SECONDS)
+        ),
+        vol.Optional("shuffle", default=False): cv.boolean,
+        vol.Optional("sleep_timer_minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_SLEEP_MINUTES)),
     }
 )
 
@@ -167,12 +189,27 @@ def _resolve_scene_uuid(coord: CelebrightCoordinator, device_id: str, scene: str
     return scene_uuid
 
 
+def _resolve_playlist_uuid(coord: CelebrightCoordinator, device_id: str, playlist: str) -> str:
+    if not uses_v3_firmware(coord.device_infos.get(device_id)):
+        raise ServiceValidationError("Playlists need a controller on firmware 3.x.")
+    playlist_uuid = coord.playlist_uuid_for(device_id, playlist)
+    if not playlist_uuid:
+        names = [p.name for p in coord.playlists.get(device_id, [])]
+        raise ServiceValidationError(
+            f"Playlist '{playlist}' not found for device {device_id}. Available: {names}"
+        )
+    return playlist_uuid
+
+
 def _build_event_kwargs(hass: HomeAssistant, coord, device_id: str, data: dict) -> dict:
     by_day = data.get("by_day")
     if by_day and by_day.upper() not in _WEEKDAYS:
         raise ServiceValidationError(f"by_day must be one of {sorted(_WEEKDAYS)}")
     repeat_until = data.get("repeat_until")
-    scene_uuid = _resolve_scene_uuid(coord, device_id, data["scene"])
+    if bool(data.get("scene")) == bool(data.get("playlist")):
+        raise ServiceValidationError("Give the event either a scene or a playlist")
+    playlist_uuid = _resolve_playlist_uuid(coord, device_id, data["playlist"]) if data.get("playlist") else None
+    scene_uuid = None if playlist_uuid else _resolve_scene_uuid(coord, device_id, data["scene"])
     start_date = _parse_date(hass, data["start_date"])
     end_date = _parse_date(hass, data["end_date"])
     start_time = _parse_time(data["start_time"])
@@ -187,7 +224,7 @@ def _build_event_kwargs(hass: HomeAssistant, coord, device_id: str, data: dict) 
     end_anchor, end_clock = code_to_anchor(end_time)
     return {
         "name": data["name"],
-        "scene_uuid": scene_uuid,
+        "scene_uuid": scene_uuid or "",
         "start_date": start_date,
         "end_date": end_date,
         "start_time": start_time,
@@ -204,6 +241,10 @@ def _build_event_kwargs(hass: HomeAssistant, coord, device_id: str, data: dict) 
         "v3_event": {
             "name": data["name"],
             "scene_uuid": scene_uuid,
+            "playlist_uuid": playlist_uuid,
+            "playlist_seconds": data.get("seconds_per_scene", DEFAULT_SECONDS) if playlist_uuid else None,
+            "playlist_shuffle": bool(data.get("shuffle")) if playlist_uuid else False,
+            "playlist_once": bool(data.get("play_once")) if playlist_uuid else False,
             "start_date": _epoch_to_local_date(start_date),
             "end_date": _epoch_to_local_date(end_date),
             "start_anchor": start_anchor,
@@ -312,10 +353,26 @@ def async_register_services(hass: HomeAssistant) -> None:
             info.name if info else device_id,
             device_id,
             lambda domain, unique_id: registry.async_get_entity_id(domain, DOMAIN, unique_id),
+            playlists=uses_v3_firmware(info),
         )
         path = hass.config.path(call.data["filename"])
         await hass.async_add_executor_job(_write_text, path, text)
         return {"file": path, "missing_entities": missing, "yaml": text}
+
+    async def _handle_play_playlist(call: ServiceCall) -> None:
+        coord, device_id = _find_coordinator(hass, call.data.get("device_id"))
+        playlist_uuid = coord.playlist_uuid_for(device_id, call.data["playlist"])
+        if not playlist_uuid:
+            names = [p.name for p in coord.playlists.get(device_id, [])]
+            raise ServiceValidationError(
+                f"Playlist '{call.data['playlist']}' not found for device {device_id}. Available: {names}"
+            )
+        await _run(
+            coord.async_play_playlist(
+                device_id, playlist_uuid, seconds=call.data["seconds_per_scene"],
+                shuffle=call.data["shuffle"], sleep_minutes=call.data.get("sleep_timer_minutes"),
+            )
+        )
 
     async def _handle_refresh_scenes(call: ServiceCall) -> None:
         # Refresh every loaded Celebright coordinator (no target needed).
@@ -341,6 +398,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, SERVICE_SET_EVENT_ENABLED, _handle_set_event_enabled,
         schema=SET_EVENT_ENABLED_SCHEMA, supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_PLAY_PLAYLIST, _handle_play_playlist, schema=PLAY_PLAYLIST_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN, SERVICE_REFRESH_SCENES, _handle_refresh_scenes,

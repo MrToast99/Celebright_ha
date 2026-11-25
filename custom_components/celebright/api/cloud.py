@@ -22,9 +22,11 @@ from .base import (
     DeviceInfo,
     DeviceState,
     EventInfo,
+    PlaylistInfo,
     SceneInfo,
 )
 from .mqtt import CelebrightMQTT, compute_event_md5
+from .playlists import build_playlist, parse_playlists
 from .scene_look import scene_preview
 from ..const import (
     API_BASE,
@@ -33,6 +35,7 @@ from ..const import (
     CURRENT_DISPLAY_FIELD,
     DISPLAY_OFF,
     EP_GET_DEVICE_EVENTS,
+    EP_GET_DEVICE_PLAYLISTS,
     EP_GET_DEVICE_SCENES,
     EP_GET_DEVICE_STATUSES,
     EP_GET_USER_DATA,
@@ -415,6 +418,69 @@ class CelebrightCloudAPI(CelebrightAPIBase):
             if s.get("uuid") and s.get("name")
         ]
 
+    # --- Playlists (firmware 3.x) ---
+
+    async def async_get_playlists(self, device_id: str) -> list[PlaylistInfo]:
+        """The controller's scene playlists. Raises on any error; callers decide how loud to be."""
+        data = await self._post(EP_GET_DEVICE_PLAYLISTS, {"deviceId": device_id})
+        return parse_playlists(data.get("playlists") if isinstance(data, dict) else None)
+
+    async def _wait_for_playlists(self, device_id: str, matches, attempts: int = 5, delay: float = 2.0) -> bool:
+        """Poll the playlist list until matches(list) holds; writes reach the cloud shortly after the command."""
+        for attempt in range(attempts):
+            try:
+                if matches(await self.async_get_playlists(device_id)):
+                    return True
+            except CelebrightError as err:
+                _LOGGER.debug("Reading playlists back failed: %s", err)
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+        return False
+
+    async def async_load_playlist(
+        self, device_id: str, playlist_uuid: str, seconds: int, shuffle: bool, sleep_minutes: int | None
+    ) -> None:
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        await mqtt.async_load_playlist(playlist_uuid, seconds, shuffle, sleep_minutes)
+
+    async def async_save_playlist(
+        self,
+        device_id: str,
+        *,
+        name: str,
+        scene_uuids: list[str],
+        description: str | None = None,
+        playlist_uuid: str | None = None,
+    ) -> PlaylistInfo:
+        """Create (no uuid) or update a playlist, then confirm it by reading the list back."""
+        playlist = build_playlist(name, scene_uuids, description, playlist_uuid)
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        await mqtt.async_save_playlist(playlist)
+        saved: list[PlaylistInfo] = []
+
+        def has_it(found: list[PlaylistInfo]) -> bool:
+            saved[:] = [p for p in found if p.uuid == playlist["uuid"] and p.scene_uuids == scene_uuids and p.name == playlist["name"]]
+            return bool(saved)
+
+        if not await self._wait_for_playlists(device_id, has_it):
+            raise CelebrightCommandError(
+                f"savePlaylist was sent but playlist '{playlist['name']}' isn't in your account "
+                "after 10 s: check the Celebright app"
+            )
+        return saved[0]
+
+    async def async_delete_playlist(self, device_id: str, playlist_uuid: str) -> None:
+        mqtt = await self._mqtt(device_id)
+        assert mqtt
+        await mqtt.async_delete_playlist(playlist_uuid)
+        if not await self._wait_for_playlists(device_id, lambda found: all(p.uuid != playlist_uuid for p in found)):
+            raise CelebrightCommandError(
+                f"deletePlaylist was sent but playlist {playlist_uuid} is still in your account "
+                "after 10 s: check the Celebright app"
+            )
+
     async def async_get_device_statuses(self) -> dict[str, DeviceState]:
         data = await self._post(EP_GET_DEVICE_STATUSES, {})
         statuses = {
@@ -710,7 +776,7 @@ class CelebrightCloudAPI(CelebrightAPIBase):
             # On the last look accept the same event stored with other normalisation.
             return last_try and all(
                 found.get(k) == ev.get(k)
-                for k in ("event_name", "saved_scene_uuid", "recurrence_rule", "start_date")
+                for k in ("event_name", "saved_scene_uuid", "playlist_uuid", "recurrence_rule", "start_date")
             )
 
         if not await self._wait_for_event(device_id, ev["uuid"], stored):

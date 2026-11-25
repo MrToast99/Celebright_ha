@@ -20,6 +20,7 @@ EP_GET_DEVICE_STATUSES = "/getUserDeviceStatuses"
 EP_GET_DEVICE_ZONES = "/getDeviceZones"
 EP_GET_DEVICE_SCENES = "/getDeviceScenes"
 EP_GET_DEVICE_EVENTS = "/getDeviceEvents"  # v3 event format
+EP_GET_DEVICE_PLAYLISTS = "/getDevicePlaylists"  # v3 scene playlists (shape taken from the app, not captured)
 
 # AWS AppSync GraphQL — live device status (from HAR capture)
 APPSYNC_URL = "https://4n5p3mnjnbdrdcuwf3v5o5r7jq.appsync-api.ca-central-1.amazonaws.com/graphql"

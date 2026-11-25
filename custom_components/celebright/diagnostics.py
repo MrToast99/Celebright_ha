@@ -37,6 +37,7 @@ async def async_get_config_entry_diagnostics(
             "bulb_type": info.bulb_type,
             "time_zone": info.timezone_id,
             "scene_count": len(coordinator.scenes.get(device_id, [])),
+            "playlist_count": len(getattr(coordinator, "playlists", {}).get(device_id, [])),
             "events": [
                 {
                     "priority": event.priority,

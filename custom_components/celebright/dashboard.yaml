@@ -1,6 +1,6 @@
 # Celebright dashboard template. The `celebright.generate_dashboard` service fills in your
 # controller's device id and writes celebright_dashboard.yaml; regenerate after updating
-# instead of editing it. The same three screens are on the sidebar page (Settings →
+# instead of editing it. The same screens are on the sidebar page (Settings →
 # Devices & services → Celebright → Configure → Show Celebright in the sidebar).
 title: Celebright
 views:
@@ -42,3 +42,14 @@ views:
     cards:
       - type: custom:celebright-rules-card
         device: "__DEVICE_ID__"
+
+  # --- 4. Playlists: scenes in rotation (firmware 3.x only; left out for other controllers) ---
+  # playlists-view:start
+  - title: Playlists
+    path: playlists
+    type: panel
+    icon: mdi:playlist-play
+    cards:
+      - type: custom:celebright-playlists-card
+        device: "__DEVICE_ID__"
+  # playlists-view:end

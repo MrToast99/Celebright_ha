@@ -19,7 +19,7 @@
  * events each controller has, then reads live state from Home Assistant.
  */
 
-const CARD_VERSION = "1.7.2";
+const CARD_VERSION = "1.9.3";
 
 const EN = {
   loading: "Loading…",
@@ -78,6 +78,14 @@ const EN = {
   enabled: "Enabled",
   needName: "Give the event a name.",
   needScene: "Choose a scene.",
+  sceneOrPlaylist: "Scene or playlist",
+  chooseSceneOrPlaylist: "Choose a scene or playlist",
+  scenesGroup: "Scenes",
+  playlistsGroup: "Playlists",
+  playlistPrefix: "Playlist",
+  evSeconds: "Time per scene (s)",
+  evShuffle: "Shuffle",
+  evOnce: "Once per event",
   needDate: "Choose a date.",
   info: "Controller details",
   model: "Model",
@@ -168,7 +176,11 @@ function formFromEvent(ev, today) {
   const mode = f.frequency === 4 ? (f.by_day ? "yearly_weekday" : "yearly_date") : f.frequency === 1 ? "daily" : f.frequency === 0 ? "once" : "daily";
   const form = {
     name: ev ? ev.name : "",
-    scene: ev ? ev.scene_uuid : "",
+    // "pl:<uuid>" is a playlist, anything else a scene.
+    scene: ev ? (ev.playlist ? `pl:${ev.playlist.uuid}` : ev.scene_uuid) : "",
+    pl_seconds: ev && ev.playlist ? ev.playlist.seconds : 30,
+    pl_shuffle: !!(ev && ev.playlist && ev.playlist.shuffle),
+    pl_once: !!(ev && ev.playlist && ev.playlist.once),
     priority: ev ? ev.priority || 3 : 3,
     start_date: start,
     start_kind: timeKind(f.start_time || "sunset"),
@@ -196,13 +208,20 @@ function eventData(form, device) {
   const data = {
     device_id: device.device_id,
     name: form.name.trim(),
-    scene: form.scene,
     priority: Number(form.priority),
     start_date: form.start_date,
     end_date: addDays(form.start_date, form.keepOffset ?? overnight),
     start_time: start,
     end_time: end,
   };
+  if (String(form.scene).startsWith("pl:")) {
+    data.playlist = form.scene.slice(3);
+    data.seconds_per_scene = Math.max(1, Math.min(3600, Math.round(Number(form.pl_seconds)) || 30));
+    data.shuffle = !!form.pl_shuffle;
+    data.play_once = !!form.pl_once;
+  } else {
+    data.scene = form.scene;
+  }
   if (device.v3) {
     data.enabled = !!form.enabled;
     if (form.start_kind !== "time") data.start_offset_minutes = Number(form.start_offset) || 0;
@@ -230,6 +249,7 @@ function eventData(form, device) {
 const CSS = `
   :host { display: block; color-scheme: light; }
   *, *::before, *::after { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   button, input, select { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
   :host([dark]) { color-scheme: dark; }
   :host { display: block; max-width: 1200px; margin: 0 auto; }
@@ -318,6 +338,9 @@ const CSS = `
   .offset { display: flex; align-items: center; gap: 6px; } .offset input { flex: 1; width: 100%; } .offset span { white-space: nowrap; }
   .hint { font-size: 0.75rem; }
   .check { display: flex; align-items: center; gap: 8px; font-size: 0.95rem; color: var(--primary-text-color); }
+  /* A checkbox must not take the size of a text box (the .field input rule). */
+  .check input[type=checkbox] { width: 20px; height: 20px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--primary-color); }
+  .checks { display: grid; gap: 12px; align-content: center; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
   .actions .btn { min-height: 42px; padding: 8px 18px; }
   /* Wide card (a full-width panel view on a computer). */
@@ -569,7 +592,8 @@ class CelebrightCard extends HTMLElement {
   }
 
   _eventHtml(dev, ev) {
-    const sub = [ev.scene || "?", ev.when, ev.time].filter(Boolean).join(" · ");
+    const what = ev.playlist ? `${t("playlistPrefix")}: ${ev.playlist.name || "?"}` : ev.scene || "?";
+    const sub = [what, ev.when, ev.time].filter(Boolean).join(" · ");
     return `<div class="event ${ev.enabled ? "" : "off"}">
       <div class="dot" style="background:${PRIORITY_COLOR[ev.priority] || PRIORITY_COLOR[3]}" title="${t("priority")}: ${esc(EN.priorities[ev.priority] || ev.priority)}"></div>
       <div class="body"><div class="name">${esc(ev.name)}</div><div class="sub" title="${esc(sub)}">${esc(sub)}</div></div>
@@ -728,14 +752,23 @@ class CelebrightCard extends HTMLElement {
         <input type="time" data-f="${key}_clock">
         ${dev.v3 ? `<div class="offset" data-o="${key}"><input type="number" data-f="${key}_offset" step="5" min="-720" max="720"><span>${t("minutes")}</span></div>` : ""}</div>
         ${dev.v3 ? `<span class="hint" data-h="${key}">${t("offset")}</span>` : ""}</div>`;
+    // Playlists (firmware 3.x) are offered next to the scenes; an event that already plays one keeps it listed.
+    const playlists = dev.v3 ? [...(dev.playlists || [])] : [];
+    if (ev && ev.playlist && !playlists.some((p) => p.uuid === ev.playlist.uuid)) playlists.push({ uuid: ev.playlist.uuid, name: ev.playlist.name || t("playlistPrefix") });
+    const sceneOptions = dev.scenes.map((s) => `<option value="${esc(s.uuid)}">${esc(s.name)}</option>`).join("");
     const modal = this._showModal(`<h2>${t(ev ? "editEvent" : "newEvent")}</h2>
       <label class="field"><span>${t("name")}</span><input type="text" data-f="name" maxlength="60"></label>
       <div class="two">
-        <label class="field"><span>${t("scene")}</span><select data-f="scene"><option value="">${t("chooseScene")}</option>
-          ${dev.scenes.map((s) => `<option value="${esc(s.uuid)}">${esc(s.name)}</option>`).join("")}</select></label>
+        <label class="field"><span>${t(playlists.length ? "sceneOrPlaylist" : "scene")}</span><select data-f="scene"><option value="">${t(playlists.length ? "chooseSceneOrPlaylist" : "chooseScene")}</option>
+          ${playlists.length
+            ? `<optgroup label="${t("scenesGroup")}">${sceneOptions}</optgroup><optgroup label="${t("playlistsGroup")}">${playlists.map((p) => `<option value="pl:${esc(p.uuid)}">${esc(p.name)}</option>`).join("")}</optgroup>`
+            : sceneOptions}</select></label>
         <label class="field"><span>${t("priority")}</span><select data-f="priority">
           ${[1, 2, 3, 4].map((p) => `<option value="${p}">${p} · ${EN.priorities[p]}</option>`).join("")}</select></label>
       </div>
+      <div class="two" id="pl-opts"><label class="field"><span>${t("evSeconds")}</span><input type="number" data-f="pl_seconds" min="1" max="3600" step="5"></label>
+        <div class="checks"><label class="check"><input type="checkbox" data-f="pl_shuffle"> ${t("evShuffle")}</label>
+          <label class="check"><input type="checkbox" data-f="pl_once"> ${t("evOnce")}</label></div></div>
       ${timeBlock("start", t("starts"))}${timeBlock("end", t("ends"))}
       <div class="two">
         <label class="field"><span>${t("firstNight")}</span><input type="date" data-f="start_date"></label>
@@ -762,12 +795,13 @@ class CelebrightCard extends HTMLElement {
         if (hint) hint.style.display = fixed ? "none" : "";
       }
       modal.querySelector("#until-row").style.display = form.mode === "once" ? "none" : "";
+      modal.querySelector("#pl-opts").style.display = String(form.scene).startsWith("pl:") ? "" : "none";
     };
     modal.addEventListener("input", (e) => {
       const key = e.target.dataset && e.target.dataset.f;
       if (!key) return;
       form[key] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
-      if (key.endsWith("_kind") || key === "mode") sync();
+      if (key.endsWith("_kind") || key === "mode" || key === "scene") sync();
     });
     sync();
     modal.querySelector("#cancel").onclick = () => this._closeModal();
@@ -1081,6 +1115,13 @@ Object.assign(EN, {
   holEnd: "Last day",
   holRemove: "Delete holiday",
   holPickScene: "Pick a scene first.",
+  holPickPlaylist: "Pick a playlist first.",
+  holKindScene: "A scene",
+  holKindPlaylist: "A playlist",
+  holPlaylistGone: "Playlist removed",
+  holSeconds: "Time per scene (s)",
+  holShuffle: "Shuffle",
+  holPlaylistsNone: "No playlists yet. Make one on the Playlists tab.",
   holNeedName: "Give it a name.",
   holWillBe: "Lights on",
   holConflict: "The holiday lighting automation is on and will compete with these. Turn it off to let the controller handle holidays. If you use it for the aurora alert, recreate that on the Rules tab first.",
@@ -1250,6 +1291,7 @@ class CelebrightHolidaysCard extends HTMLElement {
 
   _tileHtml(dev, row, lang) {
     const scene = this._scene(dev, row.scene);
+    const playlist = row.playlist ? (dev.playlists || []).find((p) => p.uuid === row.playlist) || null : null;
     const busy = this._busy.has(row.id);
     const status = row.status || {};
     const sub = row.enabled
@@ -1259,7 +1301,11 @@ class CelebrightHolidaysCard extends HTMLElement {
       <div class="hol-head"><div class="name" title="${esc(row.name)}">${esc(row.name)}</div>
         ${this._admin ? `<button class="toggle ${row.enabled ? "on" : ""}" data-act="hol-toggle" data-id="${esc(row.id)}" title="${row.enabled ? t("holOn") : t("holSwitchedOff")}" ${busy ? "disabled" : ""}></button>` : ""}</div>
       <div class="sub">${esc(sub)}</div>
-      ${scene ? `<div class="hol-scene">${previewHtml(scene.preview)}<span class="sname">${esc(scene.name)}</span></div>`
+      ${row.playlist
+        ? (playlist
+          ? `<div class="hol-scene">${playlist.scenes.slice(0, 2).map((x) => previewHtml(x.preview)).join("")}<span class="sname"><ha-icon icon="mdi:playlist-play"></ha-icon> ${esc(playlist.name)} · ${fmtSeconds(row.seconds || 30)}${row.shuffle ? " · " + t("holShuffle").toLowerCase() : ""}</span></div>`
+          : `<div class="hol-scene err">${t("holPlaylistGone")}</div>`)
+        : scene ? `<div class="hol-scene">${previewHtml(scene.preview)}<span class="sname">${esc(scene.name)}</span></div>`
         : `<div class="hol-scene muted">${t("holNoScene")}</div>`}
       ${busy ? `<div class="sub">${t("holSaving")}</div>` : status.state === "error" ? `<div class="err">${esc(status.message)}</div>` : ""}
     </div>`;
@@ -1288,8 +1334,8 @@ class CelebrightHolidaysCard extends HTMLElement {
   async _toggle(dev, id) {
     const row = this._rowsFor(dev).find((r) => r.id === id);
     if (!row) return;
-    if (!row.enabled && !row.scene) { this._openEditor(dev, row); return; }
-    await this._save(dev, row, { scene: row.scene, enabled: !row.enabled, before: row.before, after: row.after });
+    if (!row.enabled && !row.scene && !row.playlist) { this._openEditor(dev, row); return; }
+    await this._save(dev, row, { scene: row.scene, playlist: row.playlist, seconds: row.seconds, shuffle: row.shuffle, enabled: !row.enabled, before: row.before, after: row.after });
   }
 
   async _save(dev, row, values) {
@@ -1299,6 +1345,7 @@ class CelebrightHolidaysCard extends HTMLElement {
       const updated = await this._hass.callWS({
         type: "celebright/holiday_set", device_id: dev.device_id, holiday_id: row.id,
         scene: values.scene || null, enabled: values.enabled, before: values.before, after: values.after,
+        ...(values.playlist ? { playlist: values.playlist, seconds: values.seconds || 30, shuffle: !!values.shuffle } : {}),
       });
       const list = this._all[dev.device_id];
       list[list.findIndex((r) => r.id === row.id)] = updated;
@@ -1329,8 +1376,11 @@ class CelebrightHolidaysCard extends HTMLElement {
   _openEditor(dev, row) {
     const lang = this._hass.language;
     const custom = !row || row.custom;
+    const playlists = dev.v3 ? dev.playlists || [] : [];
     const draft = {
       scene: row ? row.scene : null, before: row ? row.before : 0, after: row ? row.after : 0,
+      kind: row && row.playlist ? "playlist" : "scene", playlist: row ? row.playlist : null,
+      seconds: row && row.seconds ? row.seconds : 30, shuffle: !!(row && row.shuffle),
       name: row ? row.name : "", start: row && row.start ? row.start : "12-20", end: row && row.end ? row.end : "01-05",
     };
     const months = MONTHS_SHORT(lang);
@@ -1344,7 +1394,12 @@ class CelebrightHolidaysCard extends HTMLElement {
       ${custom ? `<label class="field"><span>${t("holName")}</span><input data-f="name" maxlength="60" value="${esc(draft.name)}"></label>
         <div class="two"><div class="field"><span>${t("holStart")}</span>${monthDay("start", draft.start)}</div>
         <div class="field"><span>${t("holEnd")}</span>${monthDay("end", draft.end)}</div></div>` : ""}
-      <div class="field"><span>${t("holScene")}</span><div class="grid pick" id="scenes"></div></div>
+      ${playlists.length || draft.kind === "playlist" ? `<div class="two kinds"><button class="btn" data-kind="scene">${t("holKindScene")}</button><button class="btn" data-kind="playlist">${t("holKindPlaylist")}</button></div>` : ""}
+      <div class="field" id="scene-box"><span>${t("holScene")}</span><div class="grid pick" id="scenes"></div></div>
+      <div id="playlist-box" hidden>
+        <div class="field"><span>${t("playlists")}</span><div class="grid pick" id="pls"></div></div>
+        <div class="two"><label class="field"><span>${t("holSeconds")}</span><input type="number" min="1" max="3600" step="5" data-f="seconds" value="${draft.seconds}"></label>
+          <div class="checks"><label class="check"><input type="checkbox" data-f="shuffle" ${draft.shuffle ? "checked" : ""}> ${t("holShuffle")}</label></div></div></div>
       <div class="two"><label class="field"><span>${t("holBefore")}</span><input type="number" min="-14" max="14" data-f="before" value="${draft.before}"></label>
         <label class="field"><span>${t("holAfter")}</span><input type="number" min="-14" max="14" data-f="after" value="${draft.after}"></label></div>
       <div class="muted" id="preview"></div><div class="err" id="err"></div>
@@ -1364,15 +1419,32 @@ class CelebrightHolidaysCard extends HTMLElement {
         $("#preview").textContent = "";
       }
     };
-    paintScenes(); paintPreview();
+    const paintKind = () => {
+      $("#scene-box").hidden = draft.kind !== "scene";
+      $("#playlist-box").hidden = draft.kind !== "playlist";
+      modal.querySelectorAll("[data-kind]").forEach((b) => b.classList.toggle("primary", b.dataset.kind === draft.kind));
+    };
+    const paintPlaylists = () => {
+      $("#pls").innerHTML = playlists.length ? playlists.map((p) => `<button class="scene ${p.uuid === draft.playlist ? "active" : ""}" data-pl="${esc(p.uuid)}" title="${esc(p.name)}">
+        <span class="row">${p.uuid === draft.playlist ? '<ha-icon icon="mdi:check-circle"></ha-icon>' : ""}<span>${esc(p.name)}</span></span>${p.scenes.slice(0, 1).map((x) => previewHtml(x.preview)).join("")}</button>`).join("")
+        : `<div class="muted">${t("holPlaylistsNone")}</div>`;
+    };
+    paintScenes(); paintPlaylists(); paintKind(); paintPreview();
     $("#scenes").addEventListener("click", (e) => {
       const b = e.target.closest("[data-uuid]");
       if (b) { draft.scene = b.dataset.uuid; paintScenes(); }
     });
+    $("#pls").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-pl]");
+      if (b) { draft.playlist = b.dataset.pl; paintPlaylists(); }
+    });
+    modal.querySelectorAll("[data-kind]").forEach((b) => { b.onclick = () => { draft.kind = b.dataset.kind; paintKind(); }; });
     modal.addEventListener("input", (e) => {
       const f = e.target.dataset.f;
       if (f === "before" || f === "after") { draft[f] = Math.max(-14, Math.min(14, parseInt(e.target.value, 10) || 0)); paintPreview(); }
       if (f === "name") draft.name = e.target.value;
+      if (f === "seconds") draft.seconds = Math.max(1, Math.min(3600, parseInt(e.target.value, 10) || 30));
+      if (f === "shuffle") draft.shuffle = e.target.checked;
     });
     modal.addEventListener("change", (e) => {
       const f = e.target.dataset.f || "";
@@ -1395,7 +1467,7 @@ class CelebrightHolidaysCard extends HTMLElement {
     $("#save").onclick = async () => {
       const err = $("#err"); err.textContent = "";
       if (custom && !draft.name.trim()) { err.textContent = t("holNeedName"); return; }
-      if (!draft.scene) { err.textContent = t("holPickScene"); return; }
+      if (draft.kind === "playlist" ? !draft.playlist : !draft.scene) { err.textContent = t(draft.kind === "playlist" ? "holPickPlaylist" : "holPickScene"); return; }
       $("#save").disabled = true; err.className = "muted"; err.textContent = t("holSaving");
       try {
         let id = row && row.id;
@@ -1406,7 +1478,9 @@ class CelebrightHolidaysCard extends HTMLElement {
           if (!row) await this._load();   // the new holiday needs to be in the list before it is switched on
         }
         const current = (this._all[dev.device_id] || []).find((r) => r.id === id) || { id, before: 0, after: 0 };
-        const failed = await this._save(dev, current, { scene: draft.scene, enabled: true, before: draft.before, after: draft.after });
+        const failed = await this._save(dev, current, draft.kind === "playlist"
+          ? { scene: null, playlist: draft.playlist, seconds: draft.seconds, shuffle: draft.shuffle, enabled: true, before: draft.before, after: draft.after }
+          : { scene: draft.scene, enabled: true, before: draft.before, after: draft.after });
         if (failed) { err.className = "err"; err.textContent = failed; $("#save").disabled = false; return; }
         this._closeModal();
       } catch (e) {
@@ -1910,6 +1984,326 @@ class CelebrightRulesCard extends HTMLElement {
 
 Object.assign(EN, { control: "Control", panelTitle: "Celebright", menu: "Menu", controller: "Controller" });
 
+// ---- Playlists card ----------------------------------------------------------
+// Scene playlists (firmware 3.x): the controller cycles through a list of scenes. Play one with a
+// time per scene, shuffle and an optional turn-off timer; make, edit and delete them here too.
+
+Object.assign(EN, {
+  playlists: "Playlists",
+  plIntro: "A playlist cycles through several of your scenes. Play one now, or choose it for a scheduled event in the Celebright app.",
+  plRefresh: "Refresh",
+  plNone: "No playlists yet.",
+  plAdd: "New playlist",
+  plCount: "{n} scenes",
+  plCountOne: "1 scene",
+  plMore: "+{n} more",
+  plNew: "New playlist",
+  plName: "Name",
+  plDescription: "Description (optional)",
+  plScenes: "Scenes, in order",
+  plAddScene: "Add a scene",
+  plNoScenesYet: "No scenes yet. Add the first one below.",
+  plMissing: "Removed scene",
+  plDropped: "Scenes that no longer exist were taken out.",
+  plPlayTitle: "Play",
+  plSeconds: "Time per scene",
+  plShuffle: "Shuffle",
+  plTimer: "Turn off after",
+  plTimerOff: "Runs until the next scheduled event",
+  plTimerOn: "Turns off after the time below",
+  plMinutes: "minutes",
+  plNeedName: "Give the playlist a name.",
+  plNeedScenes: "Add at least one scene.",
+  plSaving: "Saving…",
+  plStarting: "Starting…",
+  plPlaying: "Playing",
+  plDelete: "Delete playlist",
+  plDeleteSure: "Tap again to delete",
+  plNeedV3: "Playlists need a controller on firmware 3.x.",
+  plReadOnly: "Only administrators can play or change playlists.",
+  plLoadFail: "Couldn't load the playlists.",
+  plUp: "Move up",
+  plDown: "Move down",
+  plRemoveScene: "Remove from the playlist",
+});
+
+const PL_CSS = `
+  .pls { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .pl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; padding: 12px; border-radius: 14px; border: 1px solid var(--divider-color); background: var(--card-background-color);
+        text-align: left; cursor: pointer; min-width: 0; }
+  .pl:hover { background: var(--secondary-background-color); }
+  .pl-head { display: flex; align-items: center; gap: 4px; }
+  .pl-head .name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl-head .icon { width: 34px; height: 34px; margin: -4px -6px -4px 0; }
+  .pl .sub { font-size: 0.8rem; color: var(--secondary-text-color); }
+  .pl-strips { display: grid; gap: 4px; }
+  .pl.add { place-content: center; justify-items: center; color: var(--secondary-text-color); border-style: dashed; min-height: 110px; }
+  .pl.add ha-icon { --mdc-icon-size: 28px; }
+  .pllist { display: grid; gap: 6px; }
+  .plrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 6px; align-items: center; padding: 6px 6px 8px 10px; border-radius: 10px; background: var(--secondary-background-color); }
+  .plrow .pn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
+  .plrow .strip { grid-column: 1 / -1; }
+  .plrow .btns { display: flex; }
+  .plrow .btns .icon { width: 36px; height: 36px; }
+  .offset[hidden] { display: none; }
+  .range-row { display: flex; align-items: center; gap: 10px; }
+  .range-row input[type=range] { flex: 1; }
+  .notice { padding: 8px 12px; border-radius: 10px; font-size: 0.9rem; background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
+  .grid.pick { max-height: 220px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+`;
+
+const fmtSeconds = (n) => (n >= 60 ? `${Math.floor(n / 60)}m${n % 60 ? ` ${n % 60}s` : ""}` : `${n}s`);
+
+class CelebrightPlaylistsCard extends HTMLElement {
+  static getStubConfig() {
+    return {};
+  }
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._info = null;
+    this._error = null;
+    this._notice = "";
+    this._modal = null;
+    this.shadowRoot.innerHTML = `<style>${CSS}${PL_CSS}</style><ha-card><div class="card" id="root"></div></ha-card>`;
+    this._root = this.shadowRoot.getElementById("root");
+    this.shadowRoot.addEventListener("click", (e) => this._click(e));
+    this.shadowRoot.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches(".pl")) { e.preventDefault(); this._click(e); }
+    });
+  }
+
+  setConfig(config) {
+    const changed = this._config && config.device !== this._config.device;
+    this._config = { ...config };
+    if (changed) this._load();
+    this._paint();
+  }
+
+  getCardSize() { return 6; }
+  getGridOptions() { return { columns: 12, min_columns: 6, rows: "auto" }; }
+
+  set hass(hass) {
+    const first = !this._hass;
+    this._hass = hass;
+    this.toggleAttribute("dark", hass.themes ? !!hass.themes.darkMode : window.matchMedia("(prefers-color-scheme: dark)").matches);
+    if (first) this._load();
+    this._paint();
+  }
+
+  get _admin() {
+    return !this._hass || !this._hass.user || this._hass.user.is_admin !== false;
+  }
+
+  _device() {
+    const list = (this._info && this._info.devices) || [];
+    const want = this._config && this._config.device;
+    return (want && list.find((d) => d.ha_device_id === want || d.device_id === want)) || list[0] || null;
+  }
+
+  async _load() {
+    if (this._loading || !this._hass) return;
+    this._loading = true;
+    try {
+      this._info = await this._hass.callWS({ type: "celebright/card_info" });
+      this._error = null;
+    } catch (err) {
+      this._error = (err && err.message) || t("plLoadFail");
+    } finally {
+      this._loading = false;
+      this._paint();
+    }
+  }
+
+  _count(n) { return n === 1 ? t("plCountOne") : t("plCount").replace("{n}", n); }
+
+  _paint() {
+    if (!this._config || !this._hass) return;
+    if (!this._info) {
+      this._root.innerHTML = `<div class="msg">${esc(this._error || t("loading"))}</div>`;
+      return;
+    }
+    const dev = this._device();
+    if (!dev) { this._root.innerHTML = `<div class="msg">${t("noDevice")}</div>`; return; }
+    if (!dev.v3) { this._root.innerHTML = `<div class="msg">${t("plNeedV3")}</div>`; return; }
+    const list = dev.playlists || [];
+    const add = this._admin ? `<button class="pl add" data-act="pl-add"><ha-icon icon="mdi:plus"></ha-icon>${t("plAdd")}</button>` : "";
+    const markup = `<div class="head"><div class="title">${t("playlists")}</div>
+        <button class="icon" data-act="pl-reload" title="${t("plRefresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button></div>
+      <div class="muted">${t("plIntro")}</div>
+      ${this._notice ? `<div class="notice">${esc(this._notice)}</div>` : ""}
+      ${this._admin ? "" : `<div class="muted">${t("plReadOnly")}</div>`}
+      ${list.length || this._admin ? "" : `<div class="muted">${t("plNone")}</div>`}
+      <div class="pls">${list.map((pl) => this._tileHtml(pl)).join("")}${add}</div>`;
+    if (markup !== this._markup) {
+      this._markup = markup;
+      this._root.innerHTML = markup;
+    }
+  }
+
+  _tileHtml(pl) {
+    const strips = pl.scenes.slice(0, 4).map((s) => previewHtml(s.preview)).join("");
+    const more = pl.scenes.length > 4 ? `<div class="sub">${t("plMore").replace("{n}", pl.scenes.length - 4)}</div>` : "";
+    return `<div class="pl" role="button" tabindex="0" data-act="pl-open" data-id="${esc(pl.uuid)}">
+      <div class="pl-head"><div class="name" title="${esc(pl.name)}">${esc(pl.name)}</div>
+        ${this._admin ? `<button class="icon" data-act="pl-edit" data-id="${esc(pl.uuid)}" title="${t("edit")}"><ha-icon icon="mdi:pencil"></ha-icon></button>` : ""}</div>
+      <div class="sub">${this._count(pl.scenes.length)}${pl.description ? ` · ${esc(pl.description)}` : ""}</div>
+      <div class="pl-strips">${strips}</div>${more}
+    </div>`;
+  }
+
+  _click(event) {
+    const el = event.target.closest("[data-act]");
+    if (!el || !this._hass) return;
+    const dev = this._device();
+    const pl = ((dev && dev.playlists) || []).find((p) => p.uuid === el.dataset.id);
+    switch (el.dataset.act) {
+      case "pl-reload": this._load(); break;
+      case "pl-open": if (this._admin && pl) this._openPlay(dev, pl); break;
+      case "pl-edit": event.stopPropagation(); if (pl) this._openEditor(dev, pl); break;
+      case "pl-add": this._openEditor(dev, null); break;
+    }
+  }
+
+  _closeModal() { if (this._modal) this._modal.remove(); this._modal = null; }
+
+  _showModal(html) {
+    this._closeModal();
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.innerHTML = `<div class="sheet">${html}</div>`;
+    modal.addEventListener("click", (e) => { if (e.target === modal) this._closeModal(); });
+    this.shadowRoot.appendChild(modal);
+    this._modal = modal;
+    return modal;
+  }
+
+  // ---- play: time per scene, shuffle, optional turn-off timer ----
+
+  _openPlay(dev, pl) {
+    const draft = { secs: 30, shuffle: false, timer: false, mins: 60 };
+    const modal = this._showModal(`<h2>${t("plPlayTitle")} “${esc(pl.name)}”</h2>
+      <div class="field"><span>${t("plSeconds")}: <b id="secs-l">${fmtSeconds(draft.secs)}</b></span>
+        <div class="range-row"><input type="range" min="5" max="300" step="5" data-f="secs" value="${draft.secs}"></div></div>
+      <label class="check"><input type="checkbox" data-f="shuffle"> ${t("plShuffle")}</label>
+      <label class="check"><input type="checkbox" data-f="timer"> ${t("plTimer")}</label>
+      <div class="offset" id="timer-row" hidden><input type="number" min="5" max="1440" step="5" data-f="mins" value="${draft.mins}"><span>${t("plMinutes")}</span></div>
+      <div class="muted" id="hint">${t("plTimerOff")}</div><div class="err" id="err"></div>
+      <div class="actions"><button class="btn" id="cancel">${t("cancel")}</button><button class="btn primary" id="go">${t("plPlayTitle")}</button></div>`);
+    const $ = (sel) => modal.querySelector(sel);
+    modal.addEventListener("input", (e) => {
+      const f = e.target.dataset.f;
+      if (f === "secs") { draft.secs = parseInt(e.target.value, 10) || 30; $("#secs-l").textContent = fmtSeconds(draft.secs); }
+      if (f === "mins") draft.mins = Math.max(1, Math.min(1440, parseInt(e.target.value, 10) || 60));
+      if (f === "shuffle") draft.shuffle = e.target.checked;
+      if (f === "timer") {
+        draft.timer = e.target.checked;
+        $("#timer-row").hidden = !draft.timer;
+        $("#hint").textContent = draft.timer ? t("plTimerOn") : t("plTimerOff");
+      }
+    });
+    $("#cancel").onclick = () => this._closeModal();
+    $("#go").onclick = async () => {
+      $("#go").disabled = true; $("#err").className = "muted"; $("#err").textContent = t("plStarting");
+      try {
+        await this._hass.callWS({
+          type: "celebright/playlist_play", device_id: dev.device_id, playlist_id: pl.uuid,
+          seconds: draft.secs, shuffle: draft.shuffle, ...(draft.timer ? { sleep_minutes: draft.mins } : {}),
+        });
+        this._closeModal();
+        this._notice = `${t("plPlaying")} “${pl.name}”`;
+        this._paint();
+        clearTimeout(this._noticeTimer);
+        this._noticeTimer = setTimeout(() => { this._notice = ""; this._paint(); }, 6000);
+      } catch (err) {
+        $("#err").className = "err"; $("#err").textContent = (err && err.message) || "Failed"; $("#go").disabled = false;
+      }
+    };
+  }
+
+  // ---- make and edit: a name, and the scenes in the order they play ----
+
+  _openEditor(dev, pl) {
+    const known = new Set(dev.scenes.map((s) => s.uuid));
+    const kept = pl ? pl.scenes.map((s) => s.uuid).filter((u) => known.has(u)) : [];
+    const draft = { name: pl ? pl.name : "", desc: pl && pl.description ? pl.description : "", scenes: kept };
+    const dropped = pl ? pl.scenes.length - kept.length : 0;
+    let sure = false;
+    const modal = this._showModal(`<h2>${esc(pl ? pl.name : t("plNew"))}</h2>
+      <label class="field"><span>${t("plName")}</span><input data-f="name" maxlength="60" value="${esc(draft.name)}"></label>
+      <label class="field"><span>${t("plDescription")}</span><input data-f="desc" maxlength="200" value="${esc(draft.desc)}"></label>
+      <div class="field"><span>${t("plScenes")}</span><div class="pllist" id="list"></div>${dropped ? `<span class="hint">${t("plDropped")}</span>` : ""}</div>
+      <div class="field"><span>${t("plAddScene")}</span><div class="grid pick" id="pool"></div></div>
+      <div class="err" id="err"></div>
+      <div class="actions">${pl ? `<button class="btn danger" id="remove">${t("plDelete")}</button>` : ""}
+        <button class="btn" id="cancel">${t("cancel")}</button><button class="btn primary" id="save">${t("save")}</button></div>`);
+    const $ = (sel) => modal.querySelector(sel);
+    const byUuid = (u) => dev.scenes.find((s) => s.uuid === u);
+    const paintList = () => {
+      $("#list").innerHTML = draft.scenes.length ? draft.scenes.map((u, i) => {
+        const s = byUuid(u);
+        return `<div class="plrow"><span class="pn" title="${esc(s.name)}">${i + 1}. ${esc(s.name)}</span>
+          <span class="btns"><button class="icon" data-i="${i}" data-m="up" title="${t("plUp")}" ${i === 0 ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+          <button class="icon" data-i="${i}" data-m="down" title="${t("plDown")}" ${i === draft.scenes.length - 1 ? "disabled" : ""}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
+          <button class="icon" data-i="${i}" data-m="del" title="${t("plRemoveScene")}"><ha-icon icon="mdi:close"></ha-icon></button></span>${previewHtml(s.preview)}</div>`;
+      }).join("") : `<div class="muted">${t("plNoScenesYet")}</div>`;
+    };
+    const paintPool = () => {
+      $("#pool").innerHTML = dev.scenes.map((s) => `<button class="scene" data-uuid="${esc(s.uuid)}" title="${esc(s.name)}">
+        <span class="row"><span>${esc(s.name)}</span></span>${previewHtml(s.preview)}</button>`).join("");
+    };
+    paintList(); paintPool();
+    $("#pool").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-uuid]");
+      if (b) { draft.scenes.push(b.dataset.uuid); paintList(); $("#list").lastElementChild.scrollIntoView({ block: "nearest" }); }
+    });
+    $("#list").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-m]");
+      if (!b) return;
+      const i = +b.dataset.i;
+      if (b.dataset.m === "del") draft.scenes.splice(i, 1);
+      else {
+        const j = b.dataset.m === "up" ? i - 1 : i + 1;
+        if (j >= 0 && j < draft.scenes.length) [draft.scenes[i], draft.scenes[j]] = [draft.scenes[j], draft.scenes[i]];
+      }
+      paintList();
+    });
+    modal.addEventListener("input", (e) => {
+      if (e.target.dataset.f === "name") draft.name = e.target.value;
+      if (e.target.dataset.f === "desc") draft.desc = e.target.value;
+    });
+    $("#cancel").onclick = () => this._closeModal();
+    if ($("#remove")) {
+      $("#remove").onclick = async () => {
+        if (!sure) { sure = true; $("#remove").textContent = t("plDeleteSure"); return; }
+        $("#remove").disabled = true; $("#err").className = "muted"; $("#err").textContent = t("plSaving");
+        try {
+          await this._hass.callWS({ type: "celebright/playlist_delete", device_id: dev.device_id, playlist_id: pl.uuid });
+          this._closeModal(); await this._load();
+        } catch (err) {
+          $("#err").className = "err"; $("#err").textContent = (err && err.message) || "Failed"; $("#remove").disabled = false;
+        }
+      };
+    }
+    $("#save").onclick = async () => {
+      const err = $("#err"); err.className = "err"; err.textContent = "";
+      if (!draft.name.trim()) { err.textContent = t("plNeedName"); return; }
+      if (!draft.scenes.length) { err.textContent = t("plNeedScenes"); return; }
+      $("#save").disabled = true; err.className = "muted"; err.textContent = t("plSaving");
+      try {
+        await this._hass.callWS({
+          type: "celebright/playlist_save", device_id: dev.device_id, ...(pl ? { playlist_id: pl.uuid } : {}),
+          name: draft.name.trim(), description: draft.desc.trim() || null, scenes: draft.scenes,
+        });
+        this._closeModal(); await this._load();
+      } catch (e) {
+        err.className = "err"; err.textContent = (e && e.message) || "Failed"; $("#save").disabled = false;
+      }
+    };
+  }
+}
+
 const PANEL_CSS = `
   :host { display: block; min-height: 100%; background: var(--primary-background-color); color: var(--primary-text-color); font-family: var(--paper-font-body1_-_font-family, Roboto, system-ui, sans-serif); }
   :host([dark]) { color-scheme: dark; }
@@ -1944,17 +2338,19 @@ class CelebrightPanel extends HTMLElement {
     this._narrow = false;
     this._devices = [];
     this._tab = "control";
-    try { const saved = localStorage.getItem("celebright-panel-tab"); this._tab = ["holidays", "rules"].includes(saved) ? saved : "control"; } catch (e) { /* storage blocked */ }
+    try { const saved = localStorage.getItem("celebright-panel-tab"); this._tab = ["holidays", "rules", "playlists"].includes(saved) ? saved : "control"; } catch (e) { /* storage blocked */ }
     this.shadowRoot.innerHTML = `<style>${PANEL_CSS}</style><header id="head"></header><main id="main"></main>`;
     this._head = this.shadowRoot.getElementById("head");
     this._main = this.shadowRoot.getElementById("main");
     this._card = document.createElement("celebright-card");
     this._hol = document.createElement("celebright-holidays-card");
     this._rules = document.createElement("celebright-rules-card");
+    this._pl = document.createElement("celebright-playlists-card");
     this._card.setConfig({});
     this._hol.setConfig({});
     this._rules.setConfig({});
-    this._main.append(this._card, this._hol, this._rules);
+    this._pl.setConfig({});
+    this._main.append(this._card, this._hol, this._rules, this._pl);
     this.shadowRoot.addEventListener("click", (e) => this._click(e));
     this.shadowRoot.addEventListener("change", (e) => this._change(e));
     this._paintHead();
@@ -1967,6 +2363,7 @@ class CelebrightPanel extends HTMLElement {
     this._card.hass = hass;
     this._hol.hass = hass;
     this._rules.hass = hass;
+    this._pl.hass = hass;
     if (first) this._loadDevices();
   }
 
@@ -1992,8 +2389,15 @@ class CelebrightPanel extends HTMLElement {
       this._card.setConfig({ device: this._device });
       this._hol.setConfig({ device: this._device });
       this._rules.setConfig({ device: this._device });
+      this._pl.setConfig({ device: this._device });
     }
     this._paintHead();
+  }
+
+  // Playlists exist on firmware 3.x only, so the tab appears only for such a controller.
+  _hasPlaylists() {
+    const dev = this._devices.find((d) => d.device_id === this._device) || this._devices[0];
+    return !!(dev && dev.v3);
   }
 
   _paintHead() {
@@ -2001,13 +2405,16 @@ class CelebrightPanel extends HTMLElement {
       ? `<select class="pick" data-f="device" aria-label="${t("controller")}">${this._devices.map((d) =>
         `<option value="${esc(d.device_id)}" ${d.device_id === this._device ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select>`
       : "";
-    const tab = (id, label) => `<button class="tab ${this._tab === id ? "active" : ""}" data-act="tab" data-tab="${id}">${esc(label)}</button>`;
+    const playlists = this._hasPlaylists();
+    const active = this._tab === "playlists" && !playlists ? "control" : this._tab;
+    const tab = (id, label) => `<button class="tab ${active === id ? "active" : ""}" data-act="tab" data-tab="${id}">${esc(label)}</button>`;
     this._head.innerHTML = `${this._narrow ? `<button class="menu" data-act="menu" title="${t("menu")}"><ha-icon icon="mdi:menu"></ha-icon></button>` : ""}
       <div class="title">${t("panelTitle")}</div>
-      <div class="tabs">${tab("control", t("control"))}${tab("holidays", t("holidays"))}${tab("rules", t("rules"))}</div>${picker}`;
-    this._card.hidden = this._tab !== "control";
-    this._hol.hidden = this._tab !== "holidays";
-    this._rules.hidden = this._tab !== "rules";
+      <div class="tabs">${tab("control", t("control"))}${tab("holidays", t("holidays"))}${tab("rules", t("rules"))}${playlists ? tab("playlists", t("playlists")) : ""}</div>${picker}`;
+    this._card.hidden = active !== "control";
+    this._hol.hidden = active !== "holidays";
+    this._rules.hidden = active !== "rules";
+    this._pl.hidden = active !== "playlists";
   }
 
   _click(event) {
@@ -2029,6 +2436,7 @@ class CelebrightPanel extends HTMLElement {
     this._card.setConfig({ device: this._device });
     this._hol.setConfig({ device: this._device });
     this._rules.setConfig({ device: this._device });
+    this._pl.setConfig({ device: this._device });
     this._paintHead();
   }
 }
@@ -2036,6 +2444,7 @@ class CelebrightPanel extends HTMLElement {
 if (!customElements.get("celebright-card")) customElements.define("celebright-card", CelebrightCard);
 if (!customElements.get("celebright-automations-card")) customElements.define("celebright-automations-card", CelebrightAutomationsCard);
 if (!customElements.get("celebright-holidays-card")) customElements.define("celebright-holidays-card", CelebrightHolidaysCard);
+if (!customElements.get("celebright-playlists-card")) customElements.define("celebright-playlists-card", CelebrightPlaylistsCard);
 if (!customElements.get("celebright-rules-card")) customElements.define("celebright-rules-card", CelebrightRulesCard);
 if (!customElements.get("celebright-panel")) customElements.define("celebright-panel", CelebrightPanel);
 if (!customElements.get("celebright-card-editor")) customElements.define("celebright-card-editor", CelebrightCardEditor);
@@ -2064,6 +2473,15 @@ if (!window.customCards.some((c) => c.type === "celebright-rules-card")) {
     type: "celebright-rules-card",
     name: "Celebright rules",
     description: "Show a scene while something is true (aurora, a switch, a sensor), then go back to the schedule.",
+    preview: false,
+    documentationURL: "https://github.com/MrToast99/Celebright_ha",
+  });
+}
+if (!window.customCards.some((c) => c.type === "celebright-playlists-card")) {
+  window.customCards.push({
+    type: "celebright-playlists-card",
+    name: "Celebright playlists",
+    description: "Play, make and edit scene playlists (controllers on firmware 3.x).",
     preview: false,
     documentationURL: "https://github.com/MrToast99/Celebright_ha",
   });

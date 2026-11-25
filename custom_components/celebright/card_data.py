@@ -144,8 +144,37 @@ def _device_payload(coord: Any, device_id: str, lookup, ha_device, local_date: _
         for scene in coord.scenes.get(device_id, [])
     ]
 
+    by_uuid = {scene.uuid: scene for scene in coord.scenes.get(device_id, [])}
+    playlists = [
+        {
+            "uuid": playlist.uuid,
+            "name": playlist.name,
+            "description": playlist.description,
+            # A scene that was deleted since keeps its slot with no name, so the card can say so.
+            "scenes": [
+                {
+                    "uuid": uuid,
+                    "name": by_uuid[uuid].name if uuid in by_uuid else None,
+                    "preview": by_uuid[uuid].preview if uuid in by_uuid else None,
+                }
+                for uuid in playlist.scene_uuids
+            ],
+        }
+        for playlist in getattr(coord, "playlists", {}).get(device_id, [])
+    ]
+
     events = []
     for ev in info.events:
+        raw = ev.raw if isinstance(ev.raw, dict) else {}
+        playlist = None
+        if raw.get("playlist_uuid"):
+            playlist = {
+                "uuid": raw["playlist_uuid"],
+                "name": coord.playlist_name_for_uuid(device_id, raw["playlist_uuid"]) if hasattr(coord, "playlist_name_for_uuid") else None,
+                "seconds": raw.get("playlist_scene_display_duration_seconds") or 30,
+                "shuffle": bool(raw.get("playlist_randomize")),
+                "once": bool(raw.get("playlist_once_per_event")),
+            }
         form = event_form(ev.raw, local_date)
         if form:
             form.update(name=ev.name, scene=ev.scene_uuid, priority=ev.priority)
@@ -155,6 +184,7 @@ def _device_payload(coord: Any, device_id: str, lookup, ha_device, local_date: _
                 "name": ev.name,
                 "scene_uuid": ev.scene_uuid,
                 "scene": coord.scene_name_for_uuid(device_id, ev.scene_uuid),
+                "playlist": playlist,
                 "when": ev.when_text,
                 "time": ev.time_text,
                 "priority": ev.priority,
@@ -170,6 +200,7 @@ def _device_payload(coord: Any, device_id: str, lookup, ha_device, local_date: _
         "v3": v3,
         "entities": entities,
         "scenes": scenes,
+        "playlists": playlists,
         "events": events,
     }
 

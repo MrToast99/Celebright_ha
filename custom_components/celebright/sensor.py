@@ -248,6 +248,7 @@ class CelebrightSensor(CelebrightEntity, SensorEntity):
                     "uuid": ev.uuid,
                     "name": ev.name,
                     "scene": self.coordinator.scene_name_for_uuid(self._device_id, ev.scene_uuid)
+                             or self._playlist_label(ev)
                              or "Unknown scene",
                     "when": ev.when_text,
                     "time": ev.time_text,
@@ -259,6 +260,13 @@ class CelebrightSensor(CelebrightEntity, SensorEntity):
             return {"events": events}
 
         return None
+
+    def _playlist_label(self, ev) -> str | None:
+        playlist_uuid = (ev.raw or {}).get("playlist_uuid") if isinstance(ev.raw, dict) else None
+        if not playlist_uuid:
+            return None
+        name = self.coordinator.playlist_name_for_uuid(self._device_id, playlist_uuid)
+        return f"Playlist: {name}" if name else "Playlist"
 
     @property
     def available(self) -> bool:

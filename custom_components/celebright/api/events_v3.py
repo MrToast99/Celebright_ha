@@ -117,21 +117,29 @@ def build_event(
     *,
     uuid: str,
     name: str,
-    scene_uuid: str,
-    start_date: str,
-    end_date: str,
-    start_anchor: str,
-    start_time: str | None,
-    end_anchor: str,
-    end_time: str | None,
+    scene_uuid: str | None = None,
+    start_date: str = "",
+    end_date: str = "",
+    start_anchor: str = "sunset",
+    start_time: str | None = None,
+    end_anchor: str = "sunrise",
+    end_time: str | None = None,
     priority: int = 3,
     start_offset_minutes: int | None = None,
     end_offset_minutes: int | None = None,
     rrule: str | None = None,
     enabled: bool = True,
     last_modified_utc: str | None = None,
+    playlist_uuid: str | None = None,
+    playlist_seconds: int | None = None,
+    playlist_shuffle: bool = False,
+    playlist_once: bool = False,
 ) -> dict[str, Any]:
-    """A complete v3 event dict, checksum included, ready for `saveEvent`."""
+    """A complete v3 event dict, checksum included, ready for `saveEvent`.
+
+    The event shows one scene, or (firmware 3.x) a playlist: then there is no scene, and the
+    playlist's seconds per scene, shuffle and "once per event" travel with it, as in the app.
+    """
     ev: dict[str, Any] = {
         "uuid": uuid,
         "md5": "",
@@ -147,8 +155,14 @@ def build_event(
         "recurrence_every_year": False,
         "enabled": enabled,
         "last_modified_utc": last_modified_utc or utc_now_str(),
-        "saved_scene_uuid": scene_uuid,
     }
+    if scene_uuid:
+        ev["saved_scene_uuid"] = scene_uuid
+    if playlist_uuid:
+        ev["playlist_uuid"] = playlist_uuid
+        ev["playlist_scene_display_duration_seconds"] = int(playlist_seconds or 30)
+        ev["playlist_randomize"] = bool(playlist_shuffle)
+        ev["playlist_once_per_event"] = bool(playlist_once)
     # The app only sends offsets for sunrise/sunset anchors (0 when unset).
     if start_anchor != "fixed_time":
         ev["start_offset_minutes"] = start_offset_minutes or 0

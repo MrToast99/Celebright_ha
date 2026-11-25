@@ -9,6 +9,9 @@ from __future__ import annotations
 import re
 from typing import Callable
 
+# The Playlists view is wrapped in these markers: kept for a controller on firmware 3.x, cut out otherwise.
+_PLAYLISTS_VIEW = re.compile(r"^[ \t]*# playlists-view:start\n(.*?)^[ \t]*# playlists-view:end\n", re.M | re.S)
+
 # Placeholder entity IDs look like <domain>.house[_<tail>]
 _PLACEHOLDER = re.compile(r"\b(light|select|sensor|binary_sensor|switch|button)\.house(_\w+)?")
 
@@ -35,9 +38,12 @@ def build_dashboard(
     device_name: str,
     device_id: str,
     lookup: Callable[[str, str], str | None],
+    *,
+    playlists: bool = False,
 ) -> tuple[str, list[str]]:
     """Fill the template for one device.
 
+    playlists: keep the Playlists view (controllers on firmware 3.x have playlists, others don't).
     lookup(domain, unique_id) returns the registered entity ID or None. Returns the
     dashboard text and the placeholders that couldn't be resolved (their card rows are
     dropped; any other mention is left unchanged).
@@ -55,6 +61,7 @@ def build_dashboard(
             return match.group(0)
         return entity_id
 
+    template = _PLAYLISTS_VIEW.sub(r"\1" if playlists else "", template)
     text = _PLACEHOLDER.sub(swap, template.replace("__DEVICE_ID__", device_id))
     # Drop card rows for entities this controller doesn't have (instead of "Entity not found").
     for placeholder in missing:

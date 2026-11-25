@@ -2,7 +2,7 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) integration for **Celebright** permanent / architectural LED lighting (CLC-series controllers). Control your lights, pick saved scenes (with colour previews), manage the built-in schedule and your holidays, react to things like the aurora, and automate it all from Home Assistant, with a graphical page of its own in the sidebar.
 
-> **Status:** `0.4.2`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
+> **Status:** `0.5.0`, cloud-based. Tested against the `app.celebright.ca` backend and a CLC-03 controller.
 
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/latest/total)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/MrToast99/Celebright_ha/total?label=downloads%40total)
@@ -50,6 +50,7 @@ Like the work? Help keep me Caffeinated!
 - [Sidebar page](#sidebar-page)
 - [Holidays](#holidays)
 - [Rules](#rules)
+- [Playlists](#playlists)
 - [Dashboard](#dashboard)
   - [Optional extras](#optional-extras)
 - [The Celebright card](#the-celebright-card)
@@ -83,10 +84,11 @@ Like the work? Help keep me Caffeinated!
 
 | Feature | What it does |
 |---|---|
-| **Sidebar page** | A Celebright item in Home Assistant's sidebar with three tabs: Control, Holidays, Rules. On for new installs, one toggle in the options |
+| **Sidebar page** | A Celebright item in Home Assistant's sidebar with the tabs Control, Holidays, Rules and (on firmware 3.x) Playlists. On for new installs, one toggle in the options |
 | **Control** | Power, brightness, colours, scene tiles with **colour previews**, Resume schedule, and a schedule editor with a form to add, edit, delete and switch events |
 | **Holidays** | A tile per holiday (New Year, December, St. Patrick's, Easter Monday, Canada Day, Truth and Reconciliation, Thanksgiving, Halloween, Remembrance Day, and your own). Each is one event on the controller, updated to next year's dates by this integration (in Home Assistant), so moving holidays and windows around a date work reliably |
 | **Rules** | Show a scene while something is true (aurora above a level, a switch, a sensor), with limits (after dark, dates, times, stop after N hours), a priority list and an **Aurora alert** starter |
+| **Playlists** | *Firmware 3.x.* Scenes in rotation: play a playlist with a time per scene, shuffle and an optional turn-off timer, or make, reorder and delete playlists. The tab appears only for a controller that supports them |
 | Automations card | For dashboards of your own: your blueprint automations in one place (switch, run, edit), with a warning if two holiday controllers compete. Not part of the sidebar page |
 | Themes and phones | Light and dark, two columns on a wide screen, bottom-sheet editors on a phone |
 
@@ -95,8 +97,8 @@ Like the work? Help keep me Caffeinated!
 | Feature | What it does |
 |---|---|
 | Blueprints | Holiday lighting controller (superseded by Holidays and Rules), scene in a date range, scene for a holiday week, scene on a toggle, resume the schedule at a time, controller-offline notification |
-| Services | `celebright.create_event`, `update_event`, `delete_event`, `set_event_enabled`, `refresh_scenes`, `generate_dashboard` |
-| Generated dashboard | A ready-made dashboard with your device filled in: three full-width views (Control, Holidays, Rules) |
+| Services | `celebright.create_event`, `update_event`, `delete_event`, `set_event_enabled`, `play_playlist`, `refresh_scenes`, `generate_dashboard` |
+| Generated dashboard | A ready-made dashboard with your device filled in: full-width views for Control, Holidays and Rules, plus Playlists for a firmware 3.x controller |
 
 ---
 
@@ -210,7 +212,7 @@ Replace `house` with your device's slug if it is named differently (see **Settin
 
 ## Sidebar page
 
-New installs get a **Celebright** item in Home Assistant's sidebar, with nothing to set up. It has three tabs: **Control** (the card: power, colour, scenes, schedule), **Holidays** and **Rules**. With several controllers it has a picker, and it remembers the tab and controller you used last.
+New installs get a **Celebright** item in Home Assistant's sidebar, with nothing to set up. It has the tabs **Control** (the card: power, colour, scenes, schedule), **Holidays**, **Rules** and, for a controller on firmware 3.x, **Playlists**. With several controllers it has a picker, and it remembers the tab and controller you used last.
 
 - **Turn it off or on:** **Settings → Devices & services → Celebright → Configure** → **Show Celebright in the sidebar**. No restart needed.
 - **Upgrading?** Installs from before 0.4.0 keep it off; switch it on the same way.
@@ -227,7 +229,8 @@ The sidebar page's **Holidays** tab (also `custom:celebright-holidays-card`) is 
 - You'll also see the events in the Celebright app. Edit holidays in Home Assistant, not the app: the next sync restores the Home Assistant settings. Celebright only ever changes or deletes events it created (those named `Holiday: ...`); your own events are never touched.
 - **Don't run these together with the holiday lighting blueprint.** If that automation is on, the tab warns you and offers to turn it off. If you used it for the aurora alert, recreate that on the **Rules** tab.
 - Switch a holiday off and its event is deleted. Anyone can see the tab; only administrators can change it.
-- Up to 12 of your own holidays. A holiday whose scene is deleted in the app shows an error on its tile; pick another scene.
+- Up to 12 of your own holidays. A holiday whose scene (or playlist) is deleted in the app shows an error on its tile; pick another.
+- **A playlist instead of a scene** (firmware 3.x): in a holiday's editor choose **A playlist**, then the playlist, the time per scene and shuffle. The holiday's one event then plays the playlist all night.
 - It is built to work on firmware 2.x too (the event repeats daily until the last night), but that hasn't been tried on that hardware.
 
 ## Rules
@@ -252,6 +255,28 @@ A rule is made of:
 - Anyone can see the tab; only administrators can change rules. Up to 20 rules per controller.
 - A rule's scene overrides the schedule and `Holiday:` events while it is showing, like picking the scene by hand.
 
+## Playlists
+
+*Firmware 3.x controllers.* The **Playlists** tab (also `custom:celebright-playlists-card`) appears next to Rules when Home Assistant sees a controller on firmware 3.x. A playlist is an ordered list of your saved scenes that the controller cycles through.
+
+- **Play:** click a playlist. Choose the **time per scene** (5 s to 5 min on the slider; the service goes up to an hour), **Shuffle**, and **Turn off after** a number of minutes, or leave the timer off to run until the next scheduled event.
+- **Make or edit:** **New playlist** (or the pencil on a tile). Give it a name, add scenes with a click, and reorder or remove them with the arrows. A scene that was deleted in the app is taken out when you edit. **Delete playlist** asks for a second tap.
+- **Same playlists as the app:** they are stored in your Celebright account, so a playlist you make here shows in the Celebright app and the other way round (checked on a real controller).
+- **From automations:** `celebright.play_playlist` does the same as the Play button.
+
+```yaml
+action: celebright.play_playlist
+data:
+  playlist: Christmas mix
+  seconds_per_scene: 30
+  shuffle: true
+  sleep_timer_minutes: 120
+```
+
+Home Assistant can't see which playlist is playing; the **Current display** sensor shows the scene the controller last reported, which may lag behind the playlist. 
+
+**In a scheduled event.** On firmware 3.x an event can play a playlist instead of one scene. In the Control tab's event form, **Scene or playlist** lists both; choosing a playlist adds **Time per scene**, **Shuffle** and **Once per event** (play through the scenes once during the event instead of repeating them). The **Holidays** tab offers the same: pick **A playlist** for a holiday. With `celebright.create_event` or `update_event`, give `playlist` instead of `scene` (see [Create an event](#create-an-event)). The event runs on the controller, so it keeps playing when Home Assistant is off.
+
 ## Dashboard
 
 You can also put the cards on your own dashboard. The integration generates a ready-made one (the Celebright card and your automations) with **your** device and entity IDs, so there is nothing to edit.
@@ -274,7 +299,7 @@ You can also put the cards on your own dashboard. The integration generates a re
    - **Storage dashboard.** **Settings → Dashboards → + Add Dashboard → New dashboard from scratch**, open it → **⋮ → Edit Dashboard → ⋮ → Raw configuration editor**, paste the file's contents, **Save**.
 3. After updating the integration, run the action again, or tap **Regenerate this dashboard** under the card on the **Control** view (it needs the default file name; a YAML dashboard shows the new file on refresh). Nothing to find-and-replace.
 
-Views: **Control** (the Celebright card, with the Regenerate button under it), **Holidays** and **Rules**, each a full-width panel. They are the same three screens as the sidebar page and read scenes, schedule and device info live from your account.
+Views: **Control** (the Celebright card, with the Regenerate button under it), **Holidays** and **Rules**, each a full-width panel. They are the same screens as the sidebar page (Playlists only for a firmware 3.x controller) and read scenes, schedule and device info live from your account.
 
 ### Optional extras
 
@@ -309,6 +334,7 @@ The sidebar page is made of cards you can also place on any dashboard. They shar
 | `custom:celebright-card` | Control, scenes, schedule and controller details | `device`, `title`, `show_controls`, `show_scenes`, `show_schedule`, `show_info` |
 | `custom:celebright-holidays-card` | The Holidays tiles and editor | `device` |
 | `custom:celebright-rules-card` | The rules list and editor | `device` |
+| `custom:celebright-playlists-card` | The playlists: play, make, edit (firmware 3.x) | `device` |
 | `custom:celebright-automations-card` | Your blueprint automations | `title` |
 
 `device` is optional with one controller (the Celebright device id, or the Home Assistant device id). Add a card from the dashboard editor (**Add card → Celebright**) or in YAML, for example:
@@ -324,7 +350,7 @@ device: "123456789"
 
 - **Controls:** power, brightness and colour (a swatch row and a colour picker).
 - **Scenes:** every saved scene as a tile with a colour preview strip (solid colour, pattern palette or individual bulbs; the pattern's motion isn't drawn), the active one marked, a search box, **Resume schedule** and a refresh button. Previews come from the scenes the integration last loaded (every 30 minutes, or the refresh button); reload the page to see a scene you've just recoloured.
-- **Schedule:** whether it runs, what is playing, the next event, and every event with an on/off toggle, edit and delete. **Add event** opens a form (name, scene, priority, sunset / sunrise / a time with an offset, first night, and once / every day / every year by date or by weekday). Controllers on firmware 2.x have no one-off events, offsets or per-event switch, and the form hides them.
+- **Schedule:** whether it runs, what is playing, the next event, and every event with an on/off toggle, edit and delete. **Add event** opens a form (name, a scene or, on firmware 3.x, a playlist, priority, sunset / sunrise / a time with an offset, first night, and once / every day / every year by date or by weekday). Controllers on firmware 2.x have no one-off events, offsets or per-event switch, and the form hides them.
 - **Controller details:** model, firmware, hardware, LED count, bulb type, colour order and location (collapsed).
 
 There is nothing to install: the integration serves the card and adds it to your dashboard resources itself. After updating, refresh the browser once. Add it from the dashboard editor (**Add card → Celebright**), or in YAML:
@@ -533,6 +559,7 @@ The schedule runs on the controller itself. The integration shows it and can **c
 | `celebright.update_event` | Change one (by `event_name` or `event_uuid`) |
 | `celebright.delete_event` | Remove one |
 | `celebright.set_event_enabled` | Switch one on or off (firmware 3.x) |
+| `celebright.play_playlist` | Play a scene playlist (`playlist` by name or UUID, `seconds_per_scene`, `shuffle`, `sleep_timer_minutes`; firmware 3.x) |
 | `celebright.refresh_scenes` | Re-pull scenes and the schedule from your account (also a button, and every 30 minutes) |
 | `celebright.generate_dashboard` | Write the generated dashboard file (`filename`, `device_id`) |
 
@@ -556,6 +583,10 @@ data:
   priority: 3                   # 1–4, higher wins on overlap
   repeat_until: "2026-12-30"    # repeat daily until this date
   # frequency: 1                # 0 = once (v3), 1 = daily (until repeat_until or forever), 4 = yearly
+  # playlist: "Christmas mix"   # v3: play a playlist instead of `scene` (give one of the two)
+  # seconds_per_scene: 30       # with a playlist: time per scene
+  # shuffle: true               # with a playlist: random order
+  # play_once: true             # with a playlist: once per event, not repeating
   # start_offset_minutes: 30    # v3: shift a sunset/sunrise time
   # enabled: false              # v3: create it switched off
 ```
@@ -632,7 +663,8 @@ logger:
 - **Patterns:** advanced per-bulb patterns are started from **saved scenes**, not built from HA.
 - **Colour previews** show a scene's colours, not a pattern's motion or speed. Zoned scenes preview their first zone.
 - **Holidays and rules** are set on the Celebright page or cards; they are not yet exposed as entities or services. **Rules** need Home Assistant running. Easter Monday and other moving dates are calculated for the next occurrence, so a holiday only exists on the controller for one occurrence at a time.
-- **Sleep timer, playlists, zones and scene editing** from the Celebright app are not available yet.
+- **Playlists** (firmware 3.x) can be played, made, edited, deleted and used in scheduled events and holidays. Home Assistant can't tell which playlist is playing, only the scene on now. Reading, saving, playing and deleting playlists are checked on a real controller; a playlist event saves and plays on a real controller. **Not yet checked:** a holiday that plays a playlist, and the exact meaning of **Once per event** (assumed from its name).
+- **Sleep timer on its own, zones and scene editing** from the Celebright app are not available yet.
 - **Unofficial:** not affiliated with or endorsed by Celebright; built from the app's own network traffic, so the cloud API may change without notice.
 
 ---

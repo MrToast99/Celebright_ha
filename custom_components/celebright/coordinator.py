@@ -19,7 +19,9 @@ from .api import (
     CelebrightLoginError,
     DeviceInfo,
     DeviceState,
+    PlaylistInfo,
     SceneInfo,
+    uses_v3_firmware,
 )
 from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN, SCAN_INTERVAL_SECONDS
 
@@ -47,6 +49,9 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         self.device_infos: dict[str, DeviceInfo] = {}
         # Saved scene lists — keyed by device_id
         self.scenes: dict[str, list[SceneInfo]] = {}
+        # Scene playlists (firmware 3.x only) — keyed by device_id
+        self.playlists: dict[str, list[PlaylistInfo]] = {}
+        self._playlist_warned: set[str] = set()
         # Optimistic active-scene tracking — device_id → scene_uuid | None
         self._active_scenes: dict[str, str | None] = {}
         # When scenes/device-info were last pulled (monotonic seconds)
@@ -60,6 +65,7 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         self.device_infos = dict(self.client._device_infos)
         for device_id in self.device_infos:
             await self._fetch_scenes(device_id)
+            await self._fetch_playlists(device_id)
         self._last_scene_refresh = time.monotonic()
 
     async def async_shutdown(self) -> None:
@@ -106,6 +112,54 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
             _LOGGER.warning("Could not load scenes for %s: %s", device_id, err)
             self.scenes.setdefault(device_id, [])
 
+    async def _fetch_playlists(self, device_id: str) -> None:
+        """Playlists exist on firmware 3.x only. A failure keeps the last list and is reported once."""
+        if not uses_v3_firmware(self.device_infos.get(device_id)):
+            self.playlists[device_id] = []
+            return
+        try:
+            self.playlists[device_id] = await self.client.async_get_playlists(device_id)
+            _LOGGER.debug("Loaded %d playlists for %s", len(self.playlists[device_id]), device_id)
+        except Exception as err:  # noqa: BLE001 - playlists are optional
+            level = _LOGGER.debug if device_id in self._playlist_warned else _LOGGER.warning
+            self._playlist_warned.add(device_id)
+            level("Could not load playlists for %s: %s", device_id, err)
+            self.playlists.setdefault(device_id, [])
+
+    def playlist_uuid_for(self, device_id: str, ident: str) -> str | None:
+        """A playlist's uuid from its uuid or its name."""
+        found = self.playlists.get(device_id, [])
+        for playlist in found:
+            if playlist.uuid == ident:
+                return playlist.uuid
+        return next((p.uuid for p in found if p.name == ident), None)
+
+    def playlist_name_for_uuid(self, device_id: str, playlist_uuid: str | None) -> str | None:
+        return next((p.name for p in self.playlists.get(device_id, []) if p.uuid == playlist_uuid), None)
+
+    async def async_play_playlist(
+        self, device_id: str, playlist_uuid: str, *, seconds: int, shuffle: bool, sleep_minutes: int | None
+    ) -> None:
+        await self.client.async_load_playlist(device_id, playlist_uuid, seconds, shuffle, sleep_minutes)
+        self.set_active_scene(device_id, None)
+        self.async_refresh_after_command()
+
+    async def async_save_playlist(
+        self, device_id: str, *, name: str, scene_uuids: list[str], description: str | None = None,
+        playlist_uuid: str | None = None,
+    ) -> PlaylistInfo:
+        saved = await self.client.async_save_playlist(
+            device_id, name=name, scene_uuids=scene_uuids, description=description, playlist_uuid=playlist_uuid
+        )
+        await self._fetch_playlists(device_id)
+        self.async_update_listeners()
+        return saved
+
+    async def async_delete_playlist(self, device_id: str, playlist_uuid: str) -> None:
+        await self.client.async_delete_playlist(device_id, playlist_uuid)
+        await self._fetch_playlists(device_id)
+        self.async_update_listeners()
+
     def scene_name_for_uuid(self, device_id: str, uuid: str | None) -> str | None:
         if not uuid:
             return None
@@ -143,6 +197,7 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
             self.device_infos = dict(await self.client.async_get_device_infos())
             for device_id in self.device_infos:
                 await self._fetch_scenes(device_id)
+                await self._fetch_playlists(device_id)
             self._last_scene_refresh = time.monotonic()
             _LOGGER.debug("Refreshed scenes/device info for %d device(s)", len(self.device_infos))
         except Exception as err:  # noqa: BLE001 - refresh is best-effort

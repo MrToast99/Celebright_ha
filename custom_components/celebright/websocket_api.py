@@ -9,12 +9,19 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
+from .api import CelebrightError
+from .api.playlists import DEFAULT_SECONDS, MAX_SECONDS, MAX_SLEEP_MINUTES, MIN_SECONDS
 from .card_data import build_card_info
 from .const import DOMAIN
 from .coordinator import CelebrightCoordinator
 from .holiday_manager import get_manager
 from .rule_engine import get_engine
 from .rules import PRESETS
+from .services import _find_coordinator
+
+
+# A guess at the limit (the app's own isn't known): enough for any show, small enough to catch a mistake.
+MAX_PLAYLIST_SCENES = 100
 
 
 def _local_date(epoch: int) -> str:
@@ -92,6 +99,9 @@ def _admin_write(schema: dict, service=get_manager):
     vol.Required("device_id"): str,
     vol.Required("holiday_id"): str,
     vol.Optional("scene"): vol.Any(str, None),
+    vol.Optional("playlist"): vol.Any(str, None),
+    vol.Optional("seconds", default=DEFAULT_SECONDS): vol.All(int, vol.Range(min=MIN_SECONDS, max=MAX_SECONDS)),
+    vol.Optional("shuffle", default=False): bool,
     vol.Required("enabled"): bool,
     vol.Optional("before", default=0): int,
     vol.Optional("after", default=0): int,
@@ -100,6 +110,7 @@ async def ws_holiday_set(manager, msg: dict):
     return await manager.async_set(
         msg["device_id"], msg["holiday_id"], scene=msg.get("scene"), enabled=msg["enabled"],
         before=msg["before"], after=msg["after"],
+        playlist=msg.get("playlist"), seconds=msg.get("seconds", DEFAULT_SECONDS), shuffle=msg.get("shuffle", False),
     )
 
 
@@ -173,8 +184,74 @@ async def ws_rule_move(engine, msg: dict):
     return {}
 
 
+# ---- scene playlists (firmware 3.x). The "service" here is Home Assistant itself: the handlers
+# find the controller by its device id.
+
+@_admin_write({
+    vol.Required("type"): "celebright/playlist_play",
+    vol.Required("device_id"): str,
+    vol.Required("playlist_id"): str,
+    vol.Optional("seconds", default=DEFAULT_SECONDS): vol.All(int, vol.Range(min=MIN_SECONDS, max=MAX_SECONDS)),
+    vol.Optional("shuffle", default=False): bool,
+    vol.Optional("sleep_minutes"): vol.Any(None, vol.All(int, vol.Range(min=1, max=MAX_SLEEP_MINUTES))),
+}, service=lambda hass: hass)
+async def ws_playlist_play(hass, msg: dict):
+    coord, device_id = _find_coordinator(hass, msg["device_id"])
+    playlist_uuid = coord.playlist_uuid_for(device_id, msg["playlist_id"])
+    if not playlist_uuid:
+        raise HomeAssistantError("That playlist no longer exists")
+    try:
+        await coord.async_play_playlist(
+            device_id, playlist_uuid, seconds=msg["seconds"], shuffle=msg["shuffle"], sleep_minutes=msg.get("sleep_minutes")
+        )
+    except CelebrightError as err:
+        raise HomeAssistantError(str(err)) from err
+    return {}
+
+
+@_admin_write({
+    vol.Required("type"): "celebright/playlist_save",
+    vol.Required("device_id"): str,
+    vol.Optional("playlist_id"): str,
+    vol.Required("name"): vol.All(str, vol.Length(min=1, max=60)),
+    vol.Optional("description"): vol.Any(None, str),
+    vol.Required("scenes"): vol.All([str], vol.Length(min=1, max=MAX_PLAYLIST_SCENES)),
+}, service=lambda hass: hass)
+async def ws_playlist_save(hass, msg: dict):
+    coord, device_id = _find_coordinator(hass, msg["device_id"])
+    known = {scene.uuid for scene in coord.scenes.get(device_id, [])}
+    if any(uuid not in known for uuid in msg["scenes"]):
+        raise HomeAssistantError("One of the scenes no longer exists: refresh and try again")
+    try:
+        saved = await coord.async_save_playlist(
+            device_id, name=msg["name"], scene_uuids=msg["scenes"], description=msg.get("description"),
+            playlist_uuid=msg.get("playlist_id"),
+        )
+    except CelebrightError as err:
+        raise HomeAssistantError(str(err)) from err
+    return {"playlist_id": saved.uuid}
+
+
+@_admin_write({
+    vol.Required("type"): "celebright/playlist_delete",
+    vol.Required("device_id"): str,
+    vol.Required("playlist_id"): str,
+}, service=lambda hass: hass)
+async def ws_playlist_delete(hass, msg: dict):
+    coord, device_id = _find_coordinator(hass, msg["device_id"])
+    playlist_uuid = coord.playlist_uuid_for(device_id, msg["playlist_id"])
+    if not playlist_uuid:
+        return {}   # already gone
+    try:
+        await coord.async_delete_playlist(device_id, playlist_uuid)
+    except CelebrightError as err:
+        raise HomeAssistantError(str(err)) from err
+    return {}
+
+
 @callback
 def async_register_websocket(hass: HomeAssistant) -> None:
     for command in (ws_card_info, ws_holidays, ws_holiday_set, ws_holiday_custom_save, ws_holiday_custom_remove,
-                    ws_rules, ws_rule_save, ws_rule_delete, ws_rule_move):
+                    ws_rules, ws_rule_save, ws_rule_delete, ws_rule_move,
+                    ws_playlist_play, ws_playlist_save, ws_playlist_delete):
         websocket_api.async_register_command(hass, command)

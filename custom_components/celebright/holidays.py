@@ -118,12 +118,20 @@ def event_name(holiday: Holiday) -> str:
     return f"{EVENT_PREFIX}{holiday.name}"
 
 
-def event_fields(holiday: Holiday, span: tuple[date, date], scene_uuid: str, enabled: bool = True) -> dict[str, Any]:
-    """The event as create_event / update_event fields: nightly until the last night."""
+def event_fields(
+    holiday: Holiday,
+    span: tuple[date, date],
+    scene_uuid: str | None,
+    enabled: bool = True,
+    playlist: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The event as create_event / update_event fields: nightly until the last night.
+
+    It shows a scene, or a playlist (`{"uuid", "seconds", "shuffle"}`) instead.
+    """
     start, end = span
-    return {
+    fields = {
         "name": event_name(holiday),
-        "scene": scene_uuid,
         "start_date": start.isoformat(),
         # A night that ends at midnight (or at sunrise) ends on the next date.
         "end_date": (start + timedelta(days=1) if holiday.overnight else start).isoformat(),
@@ -135,6 +143,11 @@ def event_fields(holiday: Holiday, span: tuple[date, date], scene_uuid: str, ena
         "repeat_until": end.isoformat(),
         "enabled": enabled,
     }
+    if playlist:
+        fields.update(playlist=playlist["uuid"], seconds_per_scene=playlist["seconds"], shuffle=playlist["shuffle"])
+    else:
+        fields["scene"] = scene_uuid
+    return fields
 
 
 # ---- custom holidays --------------------------------------------------------

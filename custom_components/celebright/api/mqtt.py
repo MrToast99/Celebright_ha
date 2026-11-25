@@ -28,6 +28,7 @@ import yarl
 
 from .base import CelebrightCommandError, CelebrightConnectionError
 from .events_v3 import utc_now_str
+from .playlists import load_payload as playlist_load_payload
 from ..const import MQTT_DEFAULT_PROTOCOL, MQTT_PROTOCOLS
 
 _LOGGER = logging.getLogger(__name__)
@@ -728,6 +729,36 @@ class CelebrightMQTT:
             )
         return await self._publish_and_await(
             "deleteEvent", {"eventUuid": event_uuid}, "deleteEventSuccess", timeout
+        )
+
+    def _require_v3(self, what: str) -> None:
+        if not self._is_v3:
+            raise CelebrightCommandError(f"{what} needs a controller on the newer protocol (v3).")
+
+    async def async_load_playlist(
+        self, playlist_uuid: str, seconds: int, shuffle: bool, sleep_minutes: int | None
+    ) -> None:
+        """Play a scene playlist (v3 only)."""
+        self._require_v3("Playing a playlist")
+        await self._send_confirmed(
+            "loadPlaylist", playlist_load_payload(playlist_uuid, seconds, shuffle, sleep_minutes),
+            strict=False,
+        )
+
+    async def async_save_playlist(self, playlist: dict[str, Any], timeout: float = 8.0) -> dict[str, Any]:
+        """Create or update (same uuid) a scene playlist (v3 only); the caller reads it back to confirm."""
+        self._require_v3("Saving a playlist")
+        return await self._send_confirmed(
+            "savePlaylist", {"playlist": playlist}, timeout, strict=False, warn=False,
+            ack_phase="databaseWrite",
+        )
+
+    async def async_delete_playlist(self, playlist_uuid: str, timeout: float = 8.0) -> dict[str, Any]:
+        """Delete a scene playlist (v3 only); the caller reads the list back to confirm."""
+        self._require_v3("Deleting a playlist")
+        return await self._send_confirmed(
+            "deletePlaylist", {"playlistUuid": playlist_uuid}, timeout, strict=False, warn=False,
+            ack_phase="databaseWrite",
         )
 
     async def async_set_event_enabled(

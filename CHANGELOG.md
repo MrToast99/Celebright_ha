@@ -4,6 +4,22 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - Pending
+
+### Added
+- **Playlists tab** for controllers on firmware 3.x. A playlist cycles through several of your scenes. Click one to play it with a time per scene, **Shuffle** and an optional **turn-off timer**; make, reorder and delete playlists too. The tab appears on the sidebar page only for a controller that supports playlists, and there is a new card, `custom:celebright-playlists-card`, for your own dashboards. The generated dashboard gets a **Playlists** view for such a controller.
+- **`celebright.play_playlist`** service (`playlist` by name or UUID, `seconds_per_scene`, `shuffle`, `sleep_timer_minutes`) for automations.
+- Each controller's playlists are read from your Celebright account at setup and with every scene refresh; a controller on firmware 2.x is not asked.
+
+- **Playlists in scheduled events.** On firmware 3.x an event can play a playlist instead of one scene: the Control tab's event form offers **Scene or playlist** (with **Time per scene**, **Shuffle** and **Once per event**), `celebright.create_event` and `update_event` take `playlist`, `seconds_per_scene`, `shuffle` and `play_once` instead of `scene`, and the Scheduled Events sensor names the playlist.
+- **Playlists in holidays.** A holiday on the Holidays tab can play **a playlist** (time per scene, shuffle) instead of a scene; its one event is moved to next year's dates as before.
+
+### Notes
+- **Checked on a real controller:** an event that plays a playlist saves, appears in the Celebright app and plays. **Not yet checked:** a holiday that plays a playlist, and what **Once per event** does (assumed from its name: play through the scenes once instead of repeating).
+- **Checked on a real controller:** a playlist made in Home Assistant appears in the Celebright app, plays (with its time per scene, shuffle and timer), and can be deleted. Shuffle and the timer were not separately verified.
+- Home Assistant can't tell which playlist is playing (the controller doesn't report it), only the scene that is on.
+- **To update:** update, restart Home Assistant, refresh your browser once. Regenerate the dashboard if you want its Playlists view.
+
 ## [0.4.2] - 2026-11-24
 
 ### Fixed

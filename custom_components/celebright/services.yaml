@@ -20,11 +20,43 @@ create_event:
         text:
     scene:
       name: Scene
-      description: Name of a saved scene to display (or its UUID).
-      required: true
+      description: Name of a saved scene to display (or its UUID). Give this or a playlist, not both.
+      required: false
       example: "My Holiday Scene"
       selector:
         text:
+    playlist:
+      name: Playlist
+      description: Name of a playlist to play instead of a single scene (or its UUID; firmware 3.x).
+      required: false
+      example: "Christmas mix"
+      selector:
+        text:
+    seconds_per_scene:
+      name: Seconds per scene
+      description: With a playlist, how long each scene shows before the next one.
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+          mode: box
+    shuffle:
+      name: Shuffle
+      description: With a playlist, play the scenes in random order.
+      required: false
+      default: false
+      selector:
+        boolean:
+    play_once:
+      name: Once per event
+      description: With a playlist, play through the scenes once per event instead of repeating them.
+      required: false
+      default: false
+      selector:
+        boolean:
     start_date:
       name: Start date
       description: First date the event applies (YYYY-MM-DD).
@@ -188,10 +220,42 @@ update_event:
         text:
     scene:
       name: Scene
-      description: Name of a saved scene to display (or its UUID).
-      required: true
+      description: Name of a saved scene to display (or its UUID). Give this or a playlist, not both.
+      required: false
       selector:
         text:
+    playlist:
+      name: Playlist
+      description: Name of a playlist to play instead of a single scene (or its UUID; firmware 3.x).
+      required: false
+      example: "Christmas mix"
+      selector:
+        text:
+    seconds_per_scene:
+      name: Seconds per scene
+      description: With a playlist, how long each scene shows before the next one.
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+          mode: box
+    shuffle:
+      name: Shuffle
+      description: With a playlist, play the scenes in random order.
+      required: false
+      default: false
+      selector:
+        boolean:
+    play_once:
+      name: Once per event
+      description: With a playlist, play through the scenes once per event instead of repeating them.
+      required: false
+      default: false
+      selector:
+        boolean:
     start_date:
       name: Start date
       required: true
@@ -393,3 +457,53 @@ refresh_scenes:
   description: >
     Re-pull the saved scenes and schedule from your Celebright account. Use after
     changing scenes in the Celebright app (they also refresh every 30 minutes).
+
+play_playlist:
+  name: Play playlist
+  description: >
+    Play a scene playlist: the controller cycles through its scenes until the next scheduled
+    event, or until the timer ends. Playlists exist on firmware 3.x controllers; make and edit
+    them on the Playlists tab or in the Celebright app.
+  fields:
+    device_id:
+      name: Device ID
+      description: Celebright device ID. Optional if you only have one device.
+      required: false
+      example: "123456789"
+      selector:
+        text:
+    playlist:
+      name: Playlist
+      description: Name of the playlist (or its UUID).
+      required: true
+      example: "Christmas mix"
+      selector:
+        text:
+    seconds_per_scene:
+      name: Seconds per scene
+      description: How long each scene shows before the next one.
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+          mode: box
+    shuffle:
+      name: Shuffle
+      description: Play the scenes in random order.
+      required: false
+      default: false
+      selector:
+        boolean:
+    sleep_timer_minutes:
+      name: Turn off after
+      description: Turn the lights off after this many minutes. Leave empty to run until the next scheduled event.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+          mode: box

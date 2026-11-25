@@ -94,7 +94,9 @@ class HolidayManager:
             start, end = hol.next_window(holiday, today, before, after)
             row = {
                 "id": holiday.id, "name": holiday.name, "info": holiday.info, "custom": holiday.custom,
-                "scene": st.get("scene"), "enabled": bool(st.get("enabled")), "before": before, "after": after,
+                "scene": st.get("scene"), "playlist": st.get("playlist"),
+                "seconds": st.get("seconds") or 30, "shuffle": bool(st.get("shuffle")),
+                "enabled": bool(st.get("enabled")), "before": before, "after": after,
                 "next": {"start": start.isoformat(), "end": end.isoformat()},
                 "status": self._status.get((device_id, holiday.id)) or {"state": "off" if not st.get("enabled") else "pending", "message": ""},
             }
@@ -107,18 +109,31 @@ class HolidayManager:
     # ---- changes ----------------------------------------------------------
 
     async def async_set(self, device_id: str, holiday_id: str, *, scene: str | None, enabled: bool,
-                        before: Any = 0, after: Any = 0) -> dict[str, Any]:
-        """Save one holiday's settings and bring its event in line right away."""
+                        before: Any = 0, after: Any = 0, playlist: str | None = None,
+                        seconds: Any = 30, shuffle: bool = False) -> dict[str, Any]:
+        """Save one holiday's settings and bring its event in line right away.
+
+        A holiday shows one scene, or a playlist (with seconds per scene and shuffle).
+        """
         await self.async_load()
         coord, _ = self._find(device_id)
         holiday = self._holiday(device_id, holiday_id)
+        if scene and playlist:
+            raise HomeAssistantError("Choose a scene or a playlist for this holiday, not both.")
         if scene and scene not in {s.uuid for s in coord.scenes.get(device_id, [])}:
             raise HomeAssistantError("That scene no longer exists. Refresh the scenes and pick another.")
-        if enabled and not scene:
-            raise HomeAssistantError("Choose a scene for this holiday first.")
+        if playlist and playlist not in {p.uuid for p in getattr(coord, "playlists", {}).get(device_id, [])}:
+            raise HomeAssistantError("That playlist no longer exists. Refresh and pick another.")
+        if enabled and not (scene or playlist):
+            raise HomeAssistantError("Choose a scene or playlist for this holiday first.")
+        try:
+            seconds = max(1, min(3600, int(seconds)))
+        except (TypeError, ValueError):
+            seconds = 30
         async with self._lock:
             self._device(device_id)["holidays"][holiday_id] = {
-                "scene": scene, "enabled": bool(enabled),
+                "scene": scene, "playlist": playlist, "seconds": seconds, "shuffle": bool(shuffle),
+                "enabled": bool(enabled),
                 "before": hol.clamp_adjust(before), "after": hol.clamp_adjust(after),
             }
             await self._save()
@@ -201,19 +216,24 @@ class HolidayManager:
         managed = dev["managed"]
         existing = self._event_for(coord, device_id, holiday, managed.get(holiday.id))
 
-        if not st.get("enabled") or not st.get("scene"):
+        if not st.get("enabled") or not (st.get("scene") or st.get("playlist")):
             if existing is not None and holiday.id in managed:  # never an event we didn't create
                 await coord.async_delete_event(device_id, existing.uuid)
             managed.pop(holiday.id, None)
             await self._save()
             return {"state": "off", "message": ""}
 
-        if st["scene"] not in {s.uuid for s in coord.scenes.get(device_id, [])}:
+        playlist = None
+        if st.get("playlist"):
+            if st["playlist"] not in {p.uuid for p in getattr(coord, "playlists", {}).get(device_id, [])}:
+                return {"state": "error", "message": "The chosen playlist no longer exists. Pick another."}
+            playlist = {"uuid": st["playlist"], "seconds": st.get("seconds") or 30, "shuffle": bool(st.get("shuffle"))}
+        elif st["scene"] not in {s.uuid for s in coord.scenes.get(device_id, [])}:
             return {"state": "error", "message": "The chosen scene no longer exists. Pick another."}
 
         today = dt_util.now().date()
         span = hol.next_window(holiday, today, hol.clamp_adjust(st.get("before")), hol.clamp_adjust(st.get("after")))
-        fields = hol.event_fields(holiday, span, st["scene"])
+        fields = hol.event_fields(holiday, span, st.get("scene"), playlist=playlist)
         message = f"{span[0]:%b} {span[0].day} – {span[1]:%b} {span[1].day}, {span[1].year}"
 
         if existing is not None and self._matches(existing, fields):
@@ -242,8 +262,18 @@ class HolidayManager:
         form = event_form(event.raw, _local_date)
         if not form:
             return False
+        raw = event.raw if isinstance(event.raw, dict) else {}
+        if "playlist" in fields:
+            same_content = (
+                raw.get("playlist_uuid") == fields["playlist"]
+                and (raw.get("playlist_scene_display_duration_seconds") or 30) == fields["seconds_per_scene"]
+                and bool(raw.get("playlist_randomize")) == bool(fields["shuffle"])
+                and not raw.get("playlist_once_per_event")
+            )
+        else:
+            same_content = event.scene_uuid == fields["scene"] and not raw.get("playlist_uuid")
         return (
-            event.scene_uuid == fields["scene"]
+            same_content
             and event.priority == fields["priority"]
             and event.name == fields["name"]
             and event.enabled
