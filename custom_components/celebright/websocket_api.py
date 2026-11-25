@@ -27,15 +27,21 @@ def ws_card_info(hass: HomeAssistant, connection: websocket_api.ActiveConnection
     """Entities, scenes and schedule events of every loaded controller."""
     entities = er.async_get(hass)
     devices = dr.async_get(hass)
-    coordinators = [
-        entry.runtime_data
-        for entry in hass.config_entries.async_entries(DOMAIN)
-        if isinstance(getattr(entry, "runtime_data", None), CelebrightCoordinator)
-    ]
+    coordinators = []
+    registry_ids: dict[str, str] = {}   # Celebright device id -> Home Assistant device id
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if not isinstance(getattr(entry, "runtime_data", None), CelebrightCoordinator):
+            continue
+        coordinators.append(entry.runtime_data)
+        # Look devices up per config entry: identifiers are no longer unique across entries,
+        # which is why async_get_device is deprecated.
+        for device in dr.async_entries_for_config_entry(devices, entry.entry_id):
+            for domain, identifier in device.identifiers:
+                if domain == DOMAIN:
+                    registry_ids.setdefault(identifier, device.id)
 
     def device_entry_id(device_id: str) -> str | None:
-        device = devices.async_get_device(identifiers={(DOMAIN, device_id)})
-        return device.id if device else None
+        return registry_ids.get(device_id)
 
     connection.send_result(
         msg["id"],

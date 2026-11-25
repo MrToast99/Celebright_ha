@@ -8,6 +8,7 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 - **Home Assistant logged "calls hass.async_create_task from a thread other than the event loop" for the rules engine.** The handler that reacts to a sensor or switch changing was not marked as running on the event loop, so Home Assistant ran it in a worker thread. It now runs on the loop. The warning was the only symptom seen, but Home Assistant warns that this can corrupt data, so update. **To update:** update, restart Home Assistant. Nothing else to do.
+- **Home Assistant logged that `device_registry.async_get_device` is deprecated** (it stops working in 2027.8). The card now finds each controller's device through its config entry instead.
 
 ### Added
 - **Diagnostics download.** **Settings → Devices & services → Celebright → ⋮ → Download diagnostics** gives a file for a bug report. It holds the firmware, LED count, schedule, scene count and live state of each controller, and leaves out your email, password, controller name and id, and location.
