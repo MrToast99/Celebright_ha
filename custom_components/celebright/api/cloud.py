@@ -365,30 +365,37 @@ class CelebrightCloudAPI(CelebrightAPIBase):
     async def async_get_device_infos(self) -> dict[str, DeviceInfo]:
         data = await self._post(EP_GET_USER_DATA, {"email": self._email})
         devices: dict[str, Any] = data.get("devices", {})
-        # Statuses merge name/model/etc. from this cache, so refresh it on every call.
-        self._device_infos = {
+        infos = {
             dev_id: _parse_device_info(dev_id, dev_raw)
             for dev_id, dev_raw in devices.items()
         }
         # v3 controllers keep richer events (anchors, offsets, RRULE, enabled) than getUserData.
-        for dev_id, info in self._device_infos.items():
+        for dev_id, info in infos.items():
             v3_events = await self._get_v3_events(dev_id, info)
             if v3_events is not None:
                 info.events = v3_events
-        return self._device_infos
+        # Statuses merge name/model/etc. from this cache, so refresh it on every complete read.
+        self._device_infos = infos
+        return infos
 
-    async def _get_events_raw(self, device_id: str) -> list[dict[str, Any]] | None:
+    async def _get_events_raw(
+        self, device_id: str, *, raise_unreachable: bool = False
+    ) -> list[dict[str, Any]] | None:
         """The device's events from getDeviceEvents (None if unavailable)."""
         try:
             data = await self._post(EP_GET_DEVICE_EVENTS, {"deviceId": device_id})
         except CelebrightError as err:
+            if raise_unreachable and isinstance(err, CelebrightConnectionError):
+                raise
             _LOGGER.debug("getDeviceEvents failed for %s: %s", device_id, err)
             return None
         events = data.get("events") if isinstance(data, dict) else None
         return events if isinstance(events, list) else None
 
     async def _get_v3_events(self, device_id: str, info: DeviceInfo):
-        raw = await self._get_events_raw(device_id)
+        # On firmware 3.x an outage must fail the whole read, so the last list is kept: the
+        # older getUserData list can miss events, and the holiday check would recreate them.
+        raw = await self._get_events_raw(device_id, raise_unreachable=uses_v3_firmware(info))
         if raw is None:
             return None
         if not raw:
@@ -853,8 +860,13 @@ class CelebrightCloudAPI(CelebrightAPIBase):
 
         if resp.status == 401:
             raise CelebrightAuthError("API returned 401")
-        if resp.status >= 400:
-            text = await resp.text()
-            raise CelebrightCommandError(f"HTTP {resp.status}: {text}")
-
-        return await resp.json(content_type=None)
+        try:
+            if resp.status >= 400:
+                text = (await resp.text())[:200]
+                if resp.status >= 500 or resp.status == 429:
+                    # Their server is failing or busy (not our request): transient, so callers retry.
+                    raise CelebrightConnectionError(f"Celebright server error (HTTP {resp.status}): {text}")
+                raise CelebrightCommandError(f"HTTP {resp.status}: {text}")
+            return await resp.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+            raise CelebrightConnectionError(f"Unreadable reply from Celebright: {err}") from err

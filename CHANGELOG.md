@@ -4,6 +4,14 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - Pending
+
+### Fixed
+- **A Celebright server outage logged "Unexpected error fetching celebright data" with a traceback.** A server error (HTTP 500 and the like, for example when their database is unreachable) now counts as the cloud being unreachable: a short log line, entities unavailable until it recovers.
+- **Starting Home Assistant during such an outage left the integration failed** until you reloaded it. Home Assistant now retries on its own.
+- **On firmware 3.x, a failed read of the events now keeps the last list.** It used to fall back to an older list that can miss events, which risked the holiday check creating a second copy of one.
+- **To update:** update, restart Home Assistant. Nothing else to do.
+
 ## [0.5.0] - 2026-11-24
 
 ### Added

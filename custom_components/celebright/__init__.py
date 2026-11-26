@@ -11,7 +11,7 @@ from homeassistant.core import CoreState, Event, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.event import async_track_time_interval
 
-from .api import CelebrightAuthError, CelebrightConnectionError, CelebrightLoginError
+from .api import CelebrightAuthError, CelebrightCommandError, CelebrightConnectionError, CelebrightLoginError
 from .card import async_register_card, async_serve_card, async_unregister_card
 from .const import DOMAIN
 from .coordinator import CelebrightConfigEntry, CelebrightCoordinator
@@ -78,9 +78,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: CelebrightConfigEntry) -
         await coordinator.async_shutdown()
         # Bad credentials: retrying can't help, so ask for a new password (reauth).
         raise ConfigEntryAuthFailed(f"Celebright login failed: {err}") from err
-    except (CelebrightConnectionError, CelebrightAuthError) as err:
+    except (CelebrightConnectionError, CelebrightAuthError, CelebrightCommandError) as err:
         await coordinator.async_shutdown()
-        # Transient (network/AWS hiccup, or an API refusal): let HA retry with back-off.
+        # Transient (network or server fault, or an API refusal): let HA retry with back-off.
         raise ConfigEntryNotReady(f"Cannot reach Celebright: {err}") from err
     except BaseException:
         # Any other failure after connecting: don't leak the HTTP session.

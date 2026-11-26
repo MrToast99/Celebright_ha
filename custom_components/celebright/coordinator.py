@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import (
     CelebrightAuthError,
     CelebrightCloudAPI,
+    CelebrightCommandError,
     CelebrightConnectionError,
     CelebrightLoginError,
     DeviceInfo,
@@ -79,8 +80,8 @@ class CelebrightCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         except CelebrightLoginError as err:
             # Cognito rejected the account: start re-authentication instead of failing every poll.
             raise ConfigEntryAuthFailed(f"Celebright login failed: {err}") from err
-        except (CelebrightConnectionError, CelebrightAuthError) as err:
-            # Unreachable, or an API refusal with a good login: treat as transient.
+        except (CelebrightConnectionError, CelebrightAuthError, CelebrightCommandError) as err:
+            # Unreachable, a server error, or a refusal with a good login: treat as transient.
             raise UpdateFailed(f"Celebright unreachable: {err}") from err
 
         for device_id, state in statuses.items():
